@@ -1,0 +1,58 @@
+# Fuzzing littlefs
+
+There is a standalone test program `test_afl.c` designed for fuzzing with
+[AFL](http://lcamtuf.coredump.cx/afl/). This automatically exercises the 
+littlefs API and verifies that the file system does not crash or interact incorrectly
+with the flash chip. 
+
+There are two steps to fuzzing. The first is to build the test program with
+the AFL version of gcc. The CC variable should point to your copy of afl-gcc.
+
+```
+afl-gcc test_afl.c -I. emubd/lfs_emubd.o lfs.c lfs_util.c -std=gnu99 -o test_afl
+```
+
+The `test_afl` program reads from stdin a list of commands
+and arguments. These are interpreted and executed on the API. 
+
+The second is to run this test program under afl as follows (where findings is 
+the output directory):
+
+```
+afl-fuzz -i afltests -o findings ./test_afl
+```
+
+This run will take hours (or days) and will (hopefully) not find any crashes.
+If a crash (or hang) is found, then the input file that caused the crash is 
+saved. This allows the specific test case to be debugged.
+
+## Reducing the size of the file
+
+AFL comes with `afl-tmin` which can reduce the size of the test input file to
+make it easier to debug.
+
+```
+afl-tmin -i findings/crashes/<somefile> -o smalltest -- ./test_afl
+```
+
+This will write a short version of the testcase file to `smalltest`. This can then be
+fed into the test program for debugging:
+
+```
+test_afl print < smalltest
+```
+
+This should still crash, but allows it to be run under a debugger. The print argument
+causes the test program to print out the sequence of operations being performed. 
+
+## Notes
+
+* Only the file portion of the API is exercised. It does not try and handle directories or attributes.
+
+* The code is really hacky.
+
+* The code uses /dev/shm as its working diretory. This is in RAM on my system and so you don't do lots
+of real disk I/O during these tests. If your drive is an SSD, then this will save lots of writes to the 
+SSD -- which is a good thing!
+
+* As of v2.1.4, the two test cases in aflresults demonstrate the slow rename and the lfs_ctz_find assert failure.
