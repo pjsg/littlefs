@@ -55,3 +55,4 @@ causes the test program to print out the sequence of operations being performed.
 of real disk I/O during these tests. If your drive is an SSD, then this will save lots of writes to the 
 SSD -- which is a good thing!
 
+* As of v2.1.4, the two test cases in aflresults demonstrate the slow rename and the lfs_ctz_find assert failure.
