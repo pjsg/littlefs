@@ -2743,6 +2743,9 @@ lfs_ssize_t lfs_file_read(lfs_t *lfs, lfs_file_t *file,
     LFS_TRACE("lfs_file_read(%p, %p, %p, %"PRIu32")",
             (void*)lfs, (void*)file, buffer, size);
     LFS_ASSERT(file->flags & LFS_F_OPENED);
+    if ((file->flags & 3) == LFS_O_WRONLY) {
+      return LFS_ERR_INVAL;
+    }
     LFS_ASSERT((file->flags & 3) != LFS_O_WRONLY);
 
     uint8_t *data = buffer;
@@ -2823,6 +2826,10 @@ lfs_ssize_t lfs_file_write(lfs_t *lfs, lfs_file_t *file,
     LFS_TRACE("lfs_file_write(%p, %p, %p, %"PRIu32")",
             (void*)lfs, (void*)file, buffer, size);
     LFS_ASSERT(file->flags & LFS_F_OPENED);
+    if ((file->flags & 3) == LFS_O_RDONLY) {
+      return LFS_ERR_INVAL;
+    }
+
     LFS_ASSERT((file->flags & 3) != LFS_O_RDONLY);
 
     const uint8_t *data = buffer;
@@ -2988,6 +2995,9 @@ int lfs_file_truncate(lfs_t *lfs, lfs_file_t *file, lfs_off_t size) {
     LFS_TRACE("lfs_file_truncate(%p, %p, %"PRIu32")",
             (void*)lfs, (void*)file, size);
     LFS_ASSERT(file->flags & LFS_F_OPENED);
+    if ((file->flags & 3) == LFS_O_RDONLY) {
+      return LFS_ERR_INVAL;
+    }
     LFS_ASSERT((file->flags & 3) != LFS_O_RDONLY);
 
     if (size > LFS_FILE_MAX) {
