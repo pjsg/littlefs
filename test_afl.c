@@ -7,7 +7,7 @@
 #define HAVE_MULTIPLE_OPEN
 
 #include "lfs.h"
-#include "emubd/lfs_emubd.h"
+#include "bd/lfs_rambd.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -47,7 +47,7 @@ static int __attribute__((used)) test_count(void *p, lfs_block_t b) {{
 
 // lfs declarations
 lfs_t lfs;
-lfs_emubd_t bd;
+lfs_rambd_t bd;
 // other declarations for convenience
 lfs_file_t file;
 lfs_dir_t dir;
@@ -87,24 +87,24 @@ int debuglog;
 #endif
 
 
-static int hook_lfs_emubd_read(const struct lfs_config *cfg, lfs_block_t block,
+static int hook_lfs_rambd_read(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, void *buffer, lfs_size_t size);
 
-static int hook_lfs_emubd_prog(const struct lfs_config *cfg, lfs_block_t block,
+static int hook_lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, const void *buffer, lfs_size_t size);
 
-static int hook_lfs_emubd_erase(const struct lfs_config *cfg, lfs_block_t block);
+static int hook_lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block);
 
-static int hook_lfs_emubd_sync(const struct lfs_config *cfg);
+static int hook_lfs_rambd_sync(const struct lfs_config *cfg);
 
 
 
 const struct lfs_config cfg = {
     .context = &bd,
-    .read  = &hook_lfs_emubd_read,
-    .prog  = &hook_lfs_emubd_prog,
-    .erase = &hook_lfs_emubd_erase,
-    .sync  = &hook_lfs_emubd_sync,
+    .read  = &hook_lfs_rambd_read,
+    .prog  = &hook_lfs_rambd_prog,
+    .erase = &hook_lfs_rambd_erase,
+    .sync  = &hook_lfs_rambd_sync,
 
     .read_size      = LFS_READ_SIZE,
     .prog_size      = LFS_PROG_SIZE,
@@ -121,16 +121,7 @@ int main(int argc, char**argv) {
   struct timeval start;
   gettimeofday(&start, 0);
 
-    char blockname[256];
-    sprintf(blockname, "/dev/shm/blocks%d", getpid());
-    char command[256];
-    sprintf(command, "rm -rf %s", blockname);
-    struct stat dirstat;
-    if (stat(blockname, &dirstat) >= 0) {
-      system(command);
-    }
-
-    lfs_emubd_create(&cfg, blockname);
+    lfs_rambd_create(&cfg);
 
     lfs_format(&lfs, &cfg);
     lfs_mount(&lfs, &cfg);
@@ -159,8 +150,6 @@ int main(int argc, char**argv) {
     gettimeofday(&now, 0);
     printf("Startup %d usec\n", (now.tv_sec - start.tv_sec) * 1000000 + now.tv_usec - start.tv_usec);
     run_fuzz_test(stdin, 4, argc > 1);
-
-    system(command);
 }
 
 #define CHECK_ERR      if (err == LFS_ERR_CORRUPT) abort()
@@ -200,7 +189,7 @@ static int hook_abort_after = -1;
 static int hook_last_write_length = 0;
 static jmp_buf hook_abort;
 
-static int hook_lfs_emubd_read(const struct lfs_config *cfg, lfs_block_t block,
+static int hook_lfs_rambd_read(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, void *buffer, lfs_size_t size) {
   if (hook_abort_after > 0) hook_abort_after--;
 
@@ -209,10 +198,10 @@ static int hook_lfs_emubd_read(const struct lfs_config *cfg, lfs_block_t block,
     longjmp(hook_abort, 1);
   }
 
-  return lfs_emubd_read(cfg, block, off, buffer, size);
+  return lfs_rambd_read(cfg, block, off, buffer, size);
 }
 
-static int hook_lfs_emubd_prog(const struct lfs_config *cfg, lfs_block_t block,
+static int hook_lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, const void *buffer, lfs_size_t size){
   if (hook_abort_after > 0) hook_abort_after--;
 
@@ -236,17 +225,21 @@ static int hook_lfs_emubd_prog(const struct lfs_config *cfg, lfs_block_t block,
       LOGOP("  Adjusting size %d -> %d before abort\n", size, nsize);
       memcpy(nbuffer, buffer, nsize);
       memset(nbuffer + nsize, 0xff, size - nsize);
-      lfs_emubd_prog(cfg, block, off, nbuffer, size);
+      lfs_rambd_prog(cfg, block, off, nbuffer, size);
       free(nbuffer);
     }
     LOGOP(" Failing prog\n");
     longjmp(hook_abort, 1);
   }
 
-  return lfs_emubd_prog(cfg, block, off, buffer, size);
+  int rc = lfs_rambd_prog(cfg, block, off, buffer, size);
+  if (rc < 0) {
+    LOGOP("  prog operation was aborted\n");
+    longjmp(hook_abort, 1);
+  }
 }
 
-static int hook_lfs_emubd_erase(const struct lfs_config *cfg, lfs_block_t block) {
+static int hook_lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block) {
   if (hook_abort_after > 0) hook_abort_after--;
 
   if (hook_abort_after == 0) {
@@ -254,10 +247,10 @@ static int hook_lfs_emubd_erase(const struct lfs_config *cfg, lfs_block_t block)
     longjmp(hook_abort, 1);
   }
 
-  return lfs_emubd_erase(cfg, block);
+  return lfs_rambd_erase(cfg, block);
 }
 
-static int hook_lfs_emubd_sync(const struct lfs_config *cfg) {
+static int hook_lfs_rambd_sync(const struct lfs_config *cfg) {
   if (hook_abort_after > 0) hook_abort_after--;
 
   if (hook_abort_after == 0) {
@@ -265,7 +258,7 @@ static int hook_lfs_emubd_sync(const struct lfs_config *cfg) {
     longjmp(hook_abort, 1);
   }
 
-  return lfs_emubd_sync(cfg);
+  return lfs_rambd_sync(cfg);
 }
 
 static int run_fuzz_test(FILE *f, int maxfds, int _debuglog) {
@@ -380,6 +373,14 @@ static int run_fuzz_test(FILE *f, int maxfds, int _debuglog) {
     case 'P':
       hook_last_write_length = arg;
       break;
+
+    case 'A':
+    {
+      int amnt = fgetc(f) + (arg << 8);
+      lfs_rambd_prog_abort(&cfg, amnt);
+      LOGOP("  Setting prog abort after %d bytes, bitor = %d\n", amnt >> 5, (7 * (amnt & 31)) & 255);
+      break;
+    }
 
     case 's':
     {
