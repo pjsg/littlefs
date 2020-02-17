@@ -45,6 +45,21 @@ test_afl print < smalltest
 This should still crash, but allows it to be run under a debugger. The print argument
 causes the test program to print out the sequence of operations being performed. 
 
+## aflresults/
+
+This directory contains input files that can be fed into `test_afl` and which exhibit the
+crashes (or assertion failures). E.g.
+
+```
+$ ./test_afl < aflresults/lfs_ctz_find_abort 
+test_afl: lfs.c:2170: lfs_ctz_find: Assertion `head >= 2 && head <= lfs->cfg->block_count' failed.
+Aborted
+$
+```
+
+This can be debugged in `gdb` or whatever your favorite debugger is. 
+
+
 ## Notes
 
 * Only the file portion of the API is exercised. It does not try and handle directories or attributes.

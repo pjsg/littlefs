@@ -118,9 +118,6 @@ const struct lfs_config cfg = {
 
 // entry point
 int main(int argc, char**argv) {
-  struct timeval start;
-  gettimeofday(&start, 0);
-
     lfs_rambd_create(&cfg);
 
     lfs_format(&lfs, &cfg);
@@ -146,9 +143,6 @@ int main(int argc, char**argv) {
     // print the boot count
     printf("boot_count: %d\n", boot_count);
 #endif
-    struct timeval now;
-    gettimeofday(&now, 0);
-    printf("Startup %d usec\n", (now.tv_sec - start.tv_sec) * 1000000 + now.tv_usec - start.tv_usec);
     run_fuzz_test(stdin, 4, argc > 1);
 }
 
