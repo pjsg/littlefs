@@ -115,6 +115,10 @@ const struct lfs_config cfg = {
     .lookahead_size = LFS_LOOKAHEAD_SIZE,
 };
 
+#define CHECK_ERR      if (err == LFS_ERR_CORRUPT) abort()
+#define CHECK_RC(call) { int err = call; LOGOP(" -> %d\n", err); if (err == LFS_ERR_CORRUPT) abort(); }
+#define MUST_WORK(call) { int err = call; LOGOP(" -> %d\n", err); if (err < 0) { printf("**** " #call " must work and it failed\n"); abort(); }}
+#define LOGOP if (check_duration() || debuglog) printf
 
 // entry point
 int main(int argc, char**argv) {
@@ -145,10 +149,6 @@ int main(int argc, char**argv) {
 #endif
     run_fuzz_test(stdin, 4, argc > 1);
 }
-
-#define CHECK_ERR      if (err == LFS_ERR_CORRUPT) abort()
-#define CHECK_RC(call) { int err = call; LOGOP(" -> %d\n", err); if (err == LFS_ERR_CORRUPT) abort(); }
-#define LOGOP if (check_duration() || debuglog) printf
 
 struct timeval last;
 
@@ -309,8 +309,8 @@ static int run_fuzz_test(FILE *f, int maxfds, int _debuglog) {
     LOGOP("powerfail\n");
     hook_abort_after = -1;
 
-    LOGOP("  mount\n");
-    lfs_mount(FS, &cfg);
+    LOGOP("  mount");
+    MUST_WORK(lfs_mount(FS, &cfg));
 
     for (i = 0; i < 4; i++) {
       openindex[i] = -1;
@@ -497,8 +497,8 @@ static int run_fuzz_test(FILE *f, int maxfds, int _debuglog) {
           lfs_unmount(FS);
         }
 
-        LOGOP("  mount\n");
-        lfs_mount(FS, &cfg);
+        LOGOP("  mount");
+        MUST_WORK(lfs_mount(FS, &cfg));
       }
       break;
 
