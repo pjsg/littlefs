@@ -9,7 +9,7 @@ There are two steps to fuzzing. The first is to build the test program with
 the AFL version of gcc. The CC variable should point to your copy of afl-gcc.
 
 ```
-afl-gcc test_afl.c -I. emubd/lfs_emubd.o lfs.c lfs_util.c -std=gnu99 -o test_afl
+afl-gcc test_afl.c -I. bd/lfs_rambd.c lfs.c lfs_util.c -std=gnu99 -o test_afl
 ```
 
 The `test_afl` program reads from stdin a list of commands
