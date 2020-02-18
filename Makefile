@@ -33,6 +33,8 @@ ifdef VERBOSE
 override TFLAGS += -v
 endif
 
+FINDINGS ?= findings
+
 
 all: $(TARGET)
 
@@ -46,6 +48,16 @@ test:
 .SECONDEXPANSION:
 test%: tests/test$$(firstword $$(subst \#, ,%)).toml
 	./scripts/test.py $(TFLAGS) $@
+
+.PHONY: test_afl
+
+test_afl: afl/test_afl
+
+afl/test_afl: afl/*.c bd/lfs_rambd.c lfs*c
+	afl-gcc afl/test_afl.c -I. bd/lfs_rambd.c lfs.c lfs_util.c -std=gnu99 -o afl/test_afl
+
+run_afl: test_afl
+	AFL_SKIP_CPUFREQ=true  afl-fuzz -i afltests/ -o ${FINDINGS}/ afl/test_afl
 
 -include $(DEP)
 

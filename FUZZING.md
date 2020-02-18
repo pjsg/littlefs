@@ -70,4 +70,8 @@ This can be debugged in `gdb` or whatever your favorite debugger is.
 of real disk I/O during these tests. If your drive is an SSD, then this will save lots of writes to the 
 SSD -- which is a good thing!
 
-* As of v2.1.4, the two test cases in aflresults demonstrate the slow rename and the lfs_ctz_find assert failure.
+* As of v2.1.4, there are a number of test cases in aflresults that demonstrate various failures.
+
+* The driver code simulates power failures happening at *any* time. In particular, it uses the model
+of writing bytes one at a time to the flash, and then, if the power failure happens *during* the write
+of a byte, then only some of the bits may be cleared. 
