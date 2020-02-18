@@ -12,8 +12,9 @@ the AFL version of gcc.
 make test_afl
 ```
 
-The `afl/test_afl` program reads from stdin a list of commands
-and arguments. These are interpreted and executed on the API. 
+The `afl/test_afl` and `afl/test` programs read from stdin a list of commands
+and arguments. These are interpreted and executed on the API. These two programs
+are identical, except that `afl/test` does not require that `afl` is installed.
 
 The second is to run this test program under afl as follows (where findings is 
 the output directory):
@@ -43,7 +44,7 @@ This will write a short version of the testcase file to `smalltest`. This can th
 fed into the test program for debugging:
 
 ```
-afl/test_afl print < smalltest
+afl/test print < smalltest
 ```
 
 This should still crash, but allows it to be run under a debugger. The print argument
@@ -55,7 +56,7 @@ This directory contains input files that can be fed into `test_afl` and which ex
 crashes (or assertion failures). E.g.
 
 ```
-$ afl/test_afl < aflresults/prog 
+$ afl/test < aflresults/prog 
 Trying to program 0x70 into location with value 0x10
 a.out: bd/lfs_rambd.c:116: lfs_rambd_prog: Assertion `(current & new_value) == new_value' failed.
 Aborted
