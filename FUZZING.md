@@ -6,21 +6,25 @@ littlefs API and verifies that the file system does not crash or interact incorr
 with the flash chip. 
 
 There are two steps to fuzzing. The first is to build the test program with
-the AFL version of gcc. The CC variable should point to your copy of afl-gcc.
+the AFL version of gcc. 
 
 ```
-afl-gcc test_afl.c -I. bd/lfs_rambd.c lfs.c lfs_util.c -std=gnu99 -o test_afl
+make test_afl
 ```
 
-The `test_afl` program reads from stdin a list of commands
+The `afl/test_afl` program reads from stdin a list of commands
 and arguments. These are interpreted and executed on the API. 
 
 The second is to run this test program under afl as follows (where findings is 
 the output directory):
 
 ```
-afl-fuzz -i afltests -o findings ./test_afl
+afl-fuzz -i afltests -o /dev/shm/findings afl/test_afl
 ```
+
+In the invocation about, the output directory is set to /dev/shm/findings. This is in RAM on my system and so you don't do lots
+of real disk I/O during these tests. If your drive is an SSD, then this will save lots of writes to the 
+SSD -- which is a good thing! You can specify any directory that you want -- but it should be empty before the start of the run.
 
 This run will take hours (or days) and will (hopefully) not find any crashes.
 If a crash (or hang) is found, then the input file that caused the crash is 
@@ -32,14 +36,14 @@ AFL comes with `afl-tmin` which can reduce the size of the test input file to
 make it easier to debug.
 
 ```
-afl-tmin -i findings/crashes/<somefile> -o smalltest -- ./test_afl
+afl-tmin -i findings/crashes/<somefile> -o smalltest -- afl/test_afl
 ```
 
 This will write a short version of the testcase file to `smalltest`. This can then be
 fed into the test program for debugging:
 
 ```
-test_afl print < smalltest
+afl/test_afl print < smalltest
 ```
 
 This should still crash, but allows it to be run under a debugger. The print argument
@@ -51,8 +55,9 @@ This directory contains input files that can be fed into `test_afl` and which ex
 crashes (or assertion failures). E.g.
 
 ```
-$ ./test_afl < aflresults/lfs_ctz_find_abort 
-test_afl: lfs.c:2170: lfs_ctz_find: Assertion `head >= 2 && head <= lfs->cfg->block_count' failed.
+$ afl/test_afl < aflresults/prog 
+Trying to program 0x70 into location with value 0x10
+a.out: bd/lfs_rambd.c:116: lfs_rambd_prog: Assertion `(current & new_value) == new_value' failed.
 Aborted
 $
 ```
@@ -65,10 +70,6 @@ This can be debugged in `gdb` or whatever your favorite debugger is.
 * Only the file portion of the API is exercised. It does not try and handle directories or attributes.
 
 * The code is really hacky.
-
-* The code uses /dev/shm as its working diretory. This is in RAM on my system and so you don't do lots
-of real disk I/O during these tests. If your drive is an SSD, then this will save lots of writes to the 
-SSD -- which is a good thing!
 
 * As of v2.1.4, there are a number of test cases in aflresults that demonstrate various failures.
 

@@ -33,7 +33,7 @@ ifdef VERBOSE
 override TFLAGS += -v
 endif
 
-FINDINGS ?= findings
+FINDINGS ?= /dev/shm/findings
 
 
 all: $(TARGET)
