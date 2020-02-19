@@ -110,7 +110,8 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
             uint8_t current = bd->buffer[block*cfg->block_size + off + i];
             uint8_t new_value = ((uint8_t *)buffer)[i];
             if ((current & new_value) != new_value) {
-              printf("Trying to program 0x%02x into location with value 0x%02x\n", new_value, current);
+              printf("Trying to program 0x%02x into location with value 0x%02x [at offset 0x%x (in block %d) in a length of %d]\n", 
+                  new_value, current, i + off, block, size);
               LFS_ASSERT((current & new_value) == new_value);
             }
         }
@@ -123,6 +124,8 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
     if (bd->prog_abort_bits > 0 && (bd->prog_abort_bits >> 5) < nsize) {
       nsize = bd->prog_abort_bits >> 5;
       rc = -1;
+      printf("Powerfail during write of %d bytes at offset 0x%x in block %d. Wrote %d bytes.\n",
+         size, off, block, nsize);
     }
     memcpy(&bd->buffer[block*cfg->block_size + off], buffer, nsize);
     bd->prog_abort_bits -= nsize << 5;
@@ -135,6 +138,8 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
       bd->buffer[block * cfg->block_size + off] = ((uint8_t *) buffer)[nsize] | (7 * bd->prog_abort_bits);
       bd->prog_abort_bits = 0;
       rc = -1;
+      printf("Byte at offset 0x%x should have been 0x%02x, but wrote 0x%02x instead.\n",
+         off, ((uint8_t *) buffer)[nsize], bd->buffer[block * cfg->block_size + off]);
     }
 
     LFS_TRACE("lfs_rambd_prog -> %d", rc);

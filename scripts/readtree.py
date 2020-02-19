@@ -22,6 +22,7 @@ def dumptags(args, mdir, f):
         tags = mdir.tags
 
     for k, tag in enumerate(tags):
+        f.write("%04x: " %(tag.off))
         f.write("tag %08x %s" % (tag, tag.typerepr()))
         if tag.id != 0x3ff:
             f.write(" id %d" % tag.id)

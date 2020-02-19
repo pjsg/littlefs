@@ -10,6 +10,7 @@
 #include "bd/lfs_rambd.h"
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -120,6 +121,19 @@ const struct lfs_config cfg = {
 #define MUST_WORK(call) { int err = call; LOGOP(" -> %d\n", err); if (err < 0) { printf("**** " #call " must work and it failed\n"); abort(); }}
 #define LOGOP if (check_duration() || debuglog) printf
 
+static void dump_disk(int info) {
+  FILE *f = fopen("/tmp/littlefs-disk", "wb");
+
+  uint8_t *buffer = malloc(cfg.block_size);
+
+  for (int i = 0; i < cfg.block_count; i++) {
+    lfs_rambd_read(&cfg, i, 0, buffer, cfg.block_size);
+    fwrite(buffer, cfg.block_size, 1, f);
+  }
+
+  fclose(f);
+}
+
 // entry point
 int main(int argc, char**argv) {
     lfs_rambd_create(&cfg);
@@ -147,6 +161,9 @@ int main(int argc, char**argv) {
     // print the boot count
     printf("boot_count: %d\n", boot_count);
 #endif
+    if (argc > 1) {
+      signal(SIGABRT, dump_disk);
+    }
     run_fuzz_test(stdin, 4, argc > 1);
 }
 

@@ -48,7 +48,9 @@ afl/test print < smalltest
 ```
 
 This should still crash, but allows it to be run under a debugger. The print argument
-causes the test program to print out the sequence of operations being performed. 
+causes the test program to print out the sequence of operations being performed. Additionally
+it causes the contents of the virtual disk to be written out to /tmp/littlefs-disk. This
+can then be analyzed using scripts/readtree.py
 
 ## aflresults/
 
