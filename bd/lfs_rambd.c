@@ -34,8 +34,8 @@ int lfs_rambd_createcfg(const struct lfs_config *cfg,
         }
     }
 
-    // zero for reproducability?
-    memset(bd->buffer, bd->cfg->erase_value,
+    // set to something that isn't the erase value.
+    memset(bd->buffer, ~bd->cfg->erase_value,
             cfg->block_size * cfg->block_count);
 
     LFS_TRACE("lfs_rambd_createcfg -> %d", 0);
@@ -100,20 +100,13 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
     LFS_ASSERT(block < cfg->block_count);
 
     // check that data was erased? only needed for testing
-    if (bd->cfg->erase_value != -1) {
-        for (lfs_off_t i = 0; i < size; i++) {
-            LFS_ASSERT(bd->buffer[block*cfg->block_size + off + i] ==
-                    bd->cfg->erase_value);
-        }
-    } else {
-        for (lfs_off_t i = 0; i < size; i++) {
-            uint8_t current = bd->buffer[block*cfg->block_size + off + i];
-            uint8_t new_value = ((uint8_t *)buffer)[i];
-            if ((current & new_value) != new_value) {
-              printf("Trying to program 0x%02x into location with value 0x%02x [at offset 0x%x (in block %d) in a length of %d]\n", 
-                  new_value, current, i + off, block, size);
-              LFS_ASSERT((current & new_value) == new_value);
-            }
+    for (lfs_off_t i = 0; i < size; i++) {
+        int8_t current = bd->buffer[block*cfg->block_size + off + i];
+        uint8_t new_value = ((uint8_t *)buffer)[i];
+        if (current != bd->cfg->erase_value) {
+          printf("\nTrying to program 0x%02x into location with value 0x%02x [at offset 0x%x (in block %d) in a length of %d]\n", 
+              new_value, current, i + off, block, size);
+          LFS_ASSERT(current == bd->cfg->erase_value);
         }
     }
 
@@ -124,7 +117,7 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
     if (bd->prog_abort_bits > 0 && (bd->prog_abort_bits >> 5) < nsize) {
       nsize = bd->prog_abort_bits >> 5;
       rc = -1;
-      printf("Powerfail during write of %d bytes at offset 0x%x in block %d. Wrote %d bytes.\n",
+      printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Wrote %d bytes.\n",
          size, off, block, nsize);
     }
     memcpy(&bd->buffer[block*cfg->block_size + off], buffer, nsize);
@@ -161,6 +154,8 @@ int lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block) {
     // erase, only needed for testing
     memset(&bd->buffer[block*cfg->block_size],
             bd->cfg->erase_value, cfg->block_size);
+
+    bd->stats.erase_count++;
 
     LFS_TRACE("lfs_rambd_erase -> %d", 0);
     return 0;

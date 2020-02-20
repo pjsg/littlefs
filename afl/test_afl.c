@@ -19,7 +19,7 @@
 #include <errno.h>
 #include <setjmp.h>
 
-static int run_fuzz_test(FILE *f, int maxfds, int debuglog);
+static int run_fuzz_test(FILE *f, int maxfds);
 
 // test stuff
 static void test_assert(const char *file, unsigned line,
@@ -134,12 +134,48 @@ static void dump_disk(int info) {
   fclose(f);
 }
 
+struct timeval last;
+
+static int last_read = 0;
+static int last_prog = 0;
+static int last_erase = 0;
+
+static int check_duration(void) {
+  struct timeval now;
+  gettimeofday(&now, 0);
+
+  int duration = (now.tv_sec - last.tv_sec) * 1000000 + now.tv_usec - last.tv_usec;
+  last = now;
+
+  if (bd.stats.read_count != last_read || bd.stats.prog_count != last_prog || bd.stats.erase_count != last_erase) {
+    if (debuglog) {
+      printf("{r%d,p%d,e%d}", bd.stats.read_count - last_read, bd.stats.prog_count - last_prog,
+        bd.stats.erase_count - last_erase);
+    }
+    last_read = bd.stats.read_count;
+    last_prog = bd.stats.prog_count;
+    last_erase = bd.stats.erase_count;
+  }
+
+  if (duration > 1000) {
+    if (debuglog) {
+      printf("[^ %d us]", duration);
+    }
+  }
+
+  return 0;
+}
+
 // entry point
 int main(int argc, char**argv) {
+    debuglog = argc > 1;
     lfs_rambd_create(&cfg);
 
+    gettimeofday(&last, 0);
+
+    LOGOP("format/mount");
     lfs_format(&lfs, &cfg);
-    lfs_mount(&lfs, &cfg);
+    MUST_WORK(lfs_mount(&lfs, &cfg));
 #if 0
 
     // read current count
@@ -161,39 +197,10 @@ int main(int argc, char**argv) {
     // print the boot count
     printf("boot_count: %d\n", boot_count);
 #endif
-    if (argc > 1) {
+    if (debuglog) {
       signal(SIGABRT, dump_disk);
     }
-    run_fuzz_test(stdin, 4, argc > 1);
-}
-
-struct timeval last;
-
-static int last_read = 0;
-static int last_prog = 0;
-
-static int check_duration(void) {
-  struct timeval now;
-  gettimeofday(&now, 0);
-
-  int duration = (now.tv_sec - last.tv_sec) * 1000000 + now.tv_usec - last.tv_usec;
-  last = now;
-
-  if (bd.stats.read_count != last_read || bd.stats.prog_count != last_prog) {
-    if (debuglog) {
-      printf("{r%d,p%d}", bd.stats.read_count - last_read, bd.stats.prog_count - last_prog);
-    }
-    last_read = bd.stats.read_count;
-    last_prog = bd.stats.prog_count;
-  }
-
-  if (duration > 1000) {
-    if (debuglog) {
-      printf("[^ %d us]", duration);
-    }
-  }
-
-  return 0;
+    run_fuzz_test(stdin, 4);
 }
 
 static int hook_abort_after = -1;
@@ -272,11 +279,10 @@ static int hook_lfs_rambd_sync(const struct lfs_config *cfg) {
   return lfs_rambd_sync(cfg);
 }
 
-static int run_fuzz_test(FILE *f, int maxfds, int _debuglog) {
+static int run_fuzz_test(FILE *f, int maxfds) {
   // There are a bunch of arbitrary constants in this test case. Changing them will
   // almost certainly change the effets of an input file. It *may* be worth
   // making some of these constants to come from the input file. 
-  debuglog = _debuglog;
 #if 0
   int setup = fgetc(f);
 
@@ -320,8 +326,6 @@ static int run_fuzz_test(FILE *f, int maxfds, int _debuglog) {
     buff[i] = i * 19;
   }
   
-  gettimeofday(&last, 0);
-
   if (setjmp(hook_abort)) {
     LOGOP("powerfail\n");
     hook_abort_after = -1;
