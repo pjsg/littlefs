@@ -61,7 +61,7 @@ afl/test: afl/*.c bd/lfs_rambd.c lfs*c
 
 run_afl: test_afl
 	scripts/run_afl
-	echo Started fuzzing run -- use screen -r to view status
+	@echo Started fuzzing run -- use screen -r to view status
 
 -include $(DEP)
 
