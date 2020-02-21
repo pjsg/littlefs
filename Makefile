@@ -60,7 +60,8 @@ afl/test: afl/*.c bd/lfs_rambd.c lfs*c
 	$(CC) -g afl/test_afl.c -I. bd/lfs_rambd.c lfs.c lfs_util.c -std=gnu99 -o afl/test
 
 run_afl: test_afl
-	AFL_SKIP_CPUFREQ=true  afl-fuzz -i afltests/ -o ${FINDINGS}/ afl/test_afl
+	scripts/run_afl
+	echo Started fuzzing run -- use screen -r to view status
 
 -include $(DEP)
 

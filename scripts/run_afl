@@ -1,0 +1,19 @@
+#!/bin/bash
+
+NPROCS=`grep 'cpu cores' /proc/cpuinfo | uniq | cut -f2 -d:`
+
+export AFL_SKIP_CPUFREQ=true  
+
+RUNID=$$
+
+OPTS=-M
+
+SCREEN_FILE=/tmp/screen$RUNID
+
+for (( i = 1; i < $NPROCS; i++ ))
+do
+  echo screen afl-fuzz -i afltests/ -o ${FINDINGS:=/dev/shm/findings}$$/ $OPTS fuzz$i afl/test_afl >> $SCREEN_FILE
+  OPTS=-S
+done
+
+screen -d -m -c $SCREEN_FILE
