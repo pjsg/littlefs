@@ -5,6 +5,9 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #include "bd/lfs_rambd.h"
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 
 int lfs_rambd_createcfg(const struct lfs_config *cfg,
         const struct lfs_rambd_config *bdcfg) {
@@ -40,6 +43,27 @@ int lfs_rambd_createcfg(const struct lfs_config *cfg,
 
     LFS_TRACE("lfs_rambd_createcfg -> %d", 0);
     return 0;
+}
+
+int lfs_rambd_create_mmap(const struct lfs_config *cfg, const char *filename) {
+    LFS_TRACE("lfs_rambd_create(%p {.context=%p, "
+                ".read=%p, .prog=%p, .erase=%p, .sync=%p, "
+                ".read_size=%"PRIu32", .prog_size=%"PRIu32", "
+                ".block_size=%"PRIu32", .block_count=%"PRIu32"})",
+            (void*)cfg, cfg->context,
+            (void*)(uintptr_t)cfg->read, (void*)(uintptr_t)cfg->prog,
+            (void*)(uintptr_t)cfg->erase, (void*)(uintptr_t)cfg->sync,
+            cfg->read_size, cfg->prog_size, cfg->block_size, cfg->block_count);
+    static struct lfs_rambd_config defaults = {.erase_value=-1};
+    int fd = open(filename, O_CREAT|O_RDWR, 0640);
+    char *buffer = malloc(cfg->block_size * cfg->block_count);
+    memset(buffer, 0, cfg->block_size * cfg->block_count);
+    write(fd, buffer, cfg->block_size * cfg->block_count);
+    free(buffer);
+    defaults.buffer = mmap(0, cfg->block_size * cfg->block_count, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    int err = lfs_rambd_createcfg(cfg, &defaults);
+    LFS_TRACE("lfs_rambd_create -> %d", err);
+    return err;
 }
 
 int lfs_rambd_create(const struct lfs_config *cfg) {
@@ -104,7 +128,7 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
         int8_t current = bd->buffer[block*cfg->block_size + off + i];
         uint8_t new_value = ((uint8_t *)buffer)[i];
         if (current != bd->cfg->erase_value) {
-          printf("\nTrying to program 0x%02x into location with value 0x%02x [at offset 0x%x (in block %d) in a length of %d]\n", 
+          printf("\nTrying to program 0x%02x into location with value 0x%02x [at offset 0x%x (in block %d) in a length of %d]\n",
               new_value, current, i + off, block, size);
           LFS_ASSERT(current == bd->cfg->erase_value);
         }

@@ -121,24 +121,38 @@ const struct lfs_config cfg = {
 #define MUST_WORK(call) { int err = call; LOGOP(" -> %d\n", err); if (err < 0) { printf("**** " #call " must work and it failed\n"); abort(); }}
 #define LOGOP if (check_duration() || debuglog) printf
 
-static void dump_disk(int info) {
-  FILE *f = fopen("/tmp/littlefs-disk", "wb");
+static int last_read = 0;
+static int last_prog = 0;
+static int last_erase = 0;
+
+int break_suffix = -1;
+
+static void dump_disk_suffix(int suffix) {
+  char fname[256];
+  sprintf(fname, "/tmp/littlefs-disk-%d", suffix);
+
+  FILE *f = fopen(suffix ? fname : "/tmp/littlefs-disk", "wb");
 
   uint8_t *buffer = malloc(cfg.block_size);
 
   for (int i = 0; i < cfg.block_count; i++) {
     lfs_rambd_read(&cfg, i, 0, buffer, cfg.block_size);
     fwrite(buffer, cfg.block_size, 1, f);
+    last_read += cfg.block_size;
   }
 
   fclose(f);
+
+  if (break_suffix == suffix) {
+    __asm__("int $3");
+  }
+}
+
+static void dump_disk(int info) {
+  dump_disk_suffix(0);
 }
 
 struct timeval last;
-
-static int last_read = 0;
-static int last_prog = 0;
-static int last_erase = 0;
 
 static int check_duration(void) {
   struct timeval now;
@@ -169,7 +183,11 @@ static int check_duration(void) {
 // entry point
 int main(int argc, char**argv) {
     debuglog = argc > 1;
-    lfs_rambd_create(&cfg);
+    if (debuglog) {
+      lfs_rambd_create_mmap(&cfg, "/tmp/littlefs-live-disk");
+    } else {
+      lfs_rambd_create(&cfg);
+    }
 
     gettimeofday(&last, 0);
 
@@ -282,7 +300,7 @@ static int hook_lfs_rambd_sync(const struct lfs_config *cfg) {
 static int run_fuzz_test(FILE *f, int maxfds) {
   // There are a bunch of arbitrary constants in this test case. Changing them will
   // almost certainly change the effets of an input file. It *may* be worth
-  // making some of these constants to come from the input file. 
+  // making some of these constants to come from the input file.
 #if 0
   int setup = fgetc(f);
 
@@ -325,7 +343,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
   for (i = 0; i < sizeof(buff); i++) {
     buff[i] = i * 19;
   }
-  
+
   if (setjmp(hook_abort)) {
     LOGOP("powerfail\n");
     hook_abort_after = -1;
@@ -338,6 +356,8 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     }
   }
 
+  int command_count = 0;
+
   while ((c = fgetc(f)) >= 0) {
     int add;
     char rbuff[2048];
@@ -348,6 +368,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     if (arg < 0) {
       break;
     }
+    command_count++;
     int fdn = ((arg >> 6) & 3) % maxfds;
     int rc;
     int err;
@@ -536,7 +557,12 @@ static int run_fuzz_test(FILE *f, int maxfds) {
 
     default:
       ungetc(arg, f);
-      break;
+      continue;
+    }
+
+    if (debuglog) {
+      printf("{d%d} ", command_count);
+      dump_disk_suffix(command_count);
     }
   }
 
