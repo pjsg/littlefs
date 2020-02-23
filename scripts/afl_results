@@ -1,0 +1,19 @@
+#!/bin/bash
+
+for res in aflresults/*; do
+  if ! afl/test -p < $res > /tmp/afl_out.txt 2>/tmp/afl_err.txt; then
+    echo -e "\n\n\nRunning afl/test -p < $res\n"
+    cat /tmp/afl_out.txt 
+    echo 
+    cat /tmp/afl_err.txt
+  else
+    if ! afl/test -p -R < $res > /tmp/afl_out.txt 2>/tmp/afl_err.txt; then
+      echo -e "\n\n\nRunning afl/test -p -R < $res\n"
+      cat /tmp/afl_out.txt 
+      echo 
+      cat /tmp/afl_err.txt
+    else
+      echo -e "\n\n\nTest case $res passes *****************\n\n\n"
+    fi
+  fi
+done 2>/dev/null
