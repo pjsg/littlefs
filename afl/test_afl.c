@@ -1,9 +1,7 @@
 
 /* The follow defines control details of how the fuzzer can exercise the API. If you
- * undef any of these, then the fuzzer is less brutal. FOr example, if you undef
- * HAVE_REMOVE_OPEN, then the fuzzer will not attempt to remove (or rename) an open file
+ * undef any of these, then the fuzzer is less brutal. 
  */
-//#define HAVE_REMOVE_OPEN
 #define HAVE_MULTIPLE_OPEN
 
 #define _BSD_SOURCE
@@ -18,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <getopt.h>
 #include <errno.h>
 #include <setjmp.h>
 
@@ -58,6 +57,14 @@ lfs_file_t file;
 lfs_dir_t dir;
 
 int debuglog;
+int no_open_remove;
+
+#if 0
+#define LFS_READ_SIZE 8
+#define LFS_BLOCK_SIZE 4096
+#define LFS_BLOCK_COUNT 128
+#define LFS_CACHE_SIZE 256
+#endif
 
 // test configuration options
 #ifndef LFS_READ_SIZE
@@ -185,8 +192,19 @@ static int check_duration(void) {
 
 // entry point
 int main(int argc, char**argv) {
-  (void) argv;
-  debuglog = argc > 1;
+  int opt;
+
+  while ((opt = getopt(argc, argv, "pR")) > 0) {
+    switch (opt) {
+      case 'p':
+        debuglog = 1;
+        break;
+      case 'R':
+        no_open_remove = 1;
+        break;
+    }
+  }
+
   if (debuglog) {
     lfs_rambd_create_mmap(&cfg, "/tmp/littlefs-live-disk");
   } else {
@@ -409,6 +427,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
       }
 #endif
       LOGOP("  open(%d, \"%s\", 0x%x)", fdn, filename[(arg>>3) & 7], modes[arg & 7]);
+      //memset(&fd[fdn], 0, sizeof(fd[fdn]));
       err = lfs_file_open(FS, &fd[fdn], filename[(arg>>3) & 7], modes[arg & 7]);
       CHECK_ERR;
       if (err >= 0) {
@@ -506,8 +525,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
       break;
 
     case 'd':
-#ifndef HAVE_REMOVE_OPEN
-    {
+    if (no_open_remove) {
       int findex = arg & 7;
       for (i = 0; i < sizeof(openindex) / sizeof(openindex[0]); i++) {
         if (openindex[i] == findex) {
@@ -518,7 +536,6 @@ static int run_fuzz_test(FILE *f, int maxfds) {
         break;
       }
     }
-#endif
     LOGOP("  remove(\"%s\")", filename[arg & 7]);
     err = lfs_remove(FS, filename[arg & 7]);
     LOGOP(" -> %d\n", err);
@@ -526,8 +543,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     break;
 
     case 'r':
-#ifndef HAVE_REMOVE_OPEN
-    {
+    if (no_open_remove) {
       int findex = arg & 7;
       for (i = 0; i < sizeof(openindex) / sizeof(openindex[0]); i++) {
         if (openindex[i] == findex) {
@@ -538,7 +554,6 @@ static int run_fuzz_test(FILE *f, int maxfds) {
         break;
       }
     }
-#endif
     LOGOP("  rename(\"%s\", \"%s\")", filename[arg & 7], filename[(arg >> 3) & 7]);
     err = lfs_rename(FS, filename[arg & 7], filename[(arg >> 3) & 7]);
     LOGOP(" -> %d\n", err);
