@@ -297,6 +297,15 @@ static int hook_lfs_rambd_sync(const struct lfs_config *cfg) {
   return lfs_rambd_sync(cfg);
 }
 
+#define DUMP_CHANGED {  \
+    if (debuglog && last_prog_erase != bd.stats.prog_count + bd.stats.erase_count) { \
+      last_prog_erase = bd.stats.prog_count + bd.stats.erase_count; \
+      printf("{d%d} ", command_count); \
+      dump_disk_suffix(command_count); \
+      command_count++; \
+    } \
+}
+
 static int run_fuzz_test(FILE *f, int maxfds) {
   // There are a bunch of arbitrary constants in this test case. Changing them will
   // almost certainly change the effets of an input file. It *may* be worth
@@ -344,6 +353,9 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     buff[i] = i * 19;
   }
 
+  int command_count = 1;
+  int last_prog_erase = bd.stats.prog_count + bd.stats.erase_count;
+
   if (setjmp(hook_abort)) {
     LOGOP("powerfail\n");
     hook_abort_after = -1;
@@ -356,8 +368,6 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     }
   }
 
-  int command_count = 0;
-
   while ((c = fgetc(f)) >= 0) {
     int add;
     char rbuff[2048];
@@ -368,7 +378,6 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     if (arg < 0) {
       break;
     }
-    command_count++;
     int fdn = ((arg >> 6) & 3) % maxfds;
     int rc;
     int err;
@@ -377,6 +386,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
       if (openindex[fdn] >= 0) {
         LOGOP("  close(%d)", fdn);
         CHECK_RC(lfs_file_close(FS, &fd[fdn]));
+        DUMP_CHANGED;
         openindex[fdn] = -1;
       }
 #ifndef HAVE_MULTIPLE_OPEN
@@ -560,10 +570,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
       continue;
     }
 
-    if (debuglog) {
-      printf("{d%d} ", command_count);
-      dump_disk_suffix(command_count);
-    }
+    DUMP_CHANGED;
   }
 
   for (i = 0; i < 4; i++) {
