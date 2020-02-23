@@ -53,8 +53,8 @@ test%: tests/test$$(firstword $$(subst \#, ,%)).toml
 
 test_afl: afl/test afl/test_afl
 
-afl/test_afl: afl/*.c bd/lfs_rambd.c lfs*c
-	afl-gcc afl/test_afl.c -I. bd/lfs_rambd.c lfs.c lfs_util.c -std=gnu99 -o afl/test_afl
+afl/test_afl: afl/test_afl.o bd/lfs_rambd.o lfs.c lfs_util.o
+	afl-gcc afl/test_afl.o -I. bd/lfs_rambd.o lfs.c lfs_util.o -std=gnu99 -o afl/test_afl
 
 afl/test: afl/*.c bd/lfs_rambd.c lfs*c
 	$(CC) -g afl/test_afl.c -I. bd/lfs_rambd.c lfs.c lfs_util.c -std=gnu99 -o afl/test

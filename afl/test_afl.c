@@ -3,8 +3,10 @@
  * undef any of these, then the fuzzer is less brutal. FOr example, if you undef
  * HAVE_REMOVE_OPEN, then the fuzzer will not attempt to remove (or rename) an open file
  */
-#define HAVE_REMOVE_OPEN
+//#define HAVE_REMOVE_OPEN
 #define HAVE_MULTIPLE_OPEN
+
+#define _BSD_SOURCE
 
 #include "lfs.h"
 #include "bd/lfs_rambd.h"
@@ -21,6 +23,7 @@
 
 static int run_fuzz_test(FILE *f, int maxfds);
 
+#if 0
 // test stuff
 static void test_assert(const char *file, unsigned line,
         const char *s, uintmax_t v, uintmax_t e) {{
@@ -34,6 +37,7 @@ static void test_assert(const char *file, unsigned line,
 
 #define test_assert(v, e) \
         test_assert(__FILE__, __LINE__, #v " => " #e, v, e)
+#endif
 
 // implicit variable for asserts
 uintmax_t test;
@@ -52,9 +56,6 @@ lfs_rambd_t bd;
 // other declarations for convenience
 lfs_file_t file;
 lfs_dir_t dir;
-struct lfs_info info;
-uint8_t buffer[1024];
-char path[1024];
 
 int debuglog;
 
@@ -117,13 +118,13 @@ const struct lfs_config cfg = {
 };
 
 #define CHECK_ERR      if (err == LFS_ERR_CORRUPT) abort()
-#define CHECK_RC(call) { int err = call; LOGOP(" -> %d\n", err); if (err == LFS_ERR_CORRUPT) abort(); }
-#define MUST_WORK(call) { int err = call; LOGOP(" -> %d\n", err); if (err < 0) { printf("**** " #call " must work and it failed\n"); abort(); }}
+#define CHECK_RC(call) { err = call; LOGOP(" -> %d\n", err); if (err == LFS_ERR_CORRUPT) abort(); }
+#define MUST_WORK(call) { err = call; LOGOP(" -> %d\n", err); if (err < 0) { printf("**** " #call " must work and it failed\n"); abort(); }}
 #define LOGOP if (check_duration() || debuglog) printf
 
-static int last_read = 0;
-static int last_prog = 0;
-static int last_erase = 0;
+static uint32_t last_read = 0;
+static uint32_t last_prog = 0;
+static uint32_t last_erase = 0;
 
 int break_suffix = -1;
 
@@ -133,15 +134,16 @@ static void dump_disk_suffix(int suffix) {
 
   FILE *f = fopen(suffix ? fname : "/tmp/littlefs-disk", "wb");
 
-  uint8_t *buffer = malloc(cfg.block_size);
+  uint8_t *rbuffer = malloc(cfg.block_size);
 
-  for (int i = 0; i < cfg.block_count; i++) {
-    lfs_rambd_read(&cfg, i, 0, buffer, cfg.block_size);
-    fwrite(buffer, cfg.block_size, 1, f);
+  for (uint32_t i = 0; i < cfg.block_count; i++) {
+    lfs_rambd_read(&cfg, i, 0, rbuffer, cfg.block_size);
+    fwrite(rbuffer, cfg.block_size, 1, f);
     last_read += cfg.block_size;
   }
 
   fclose(f);
+  free(rbuffer);
 
   if (break_suffix == suffix) {
     __asm__("int $3");
@@ -149,6 +151,7 @@ static void dump_disk_suffix(int suffix) {
 }
 
 static void dump_disk(int info) {
+  (void) info;
   dump_disk_suffix(0);
 }
 
@@ -182,50 +185,53 @@ static int check_duration(void) {
 
 // entry point
 int main(int argc, char**argv) {
-    debuglog = argc > 1;
-    if (debuglog) {
-      lfs_rambd_create_mmap(&cfg, "/tmp/littlefs-live-disk");
-    } else {
-      lfs_rambd_create(&cfg);
-    }
+  (void) argv;
+  debuglog = argc > 1;
+  if (debuglog) {
+    lfs_rambd_create_mmap(&cfg, "/tmp/littlefs-live-disk");
+  } else {
+    lfs_rambd_create(&cfg);
+  }
 
-    gettimeofday(&last, 0);
+  gettimeofday(&last, 0);
 
-    LOGOP("format/mount");
-    lfs_format(&lfs, &cfg);
-    MUST_WORK(lfs_mount(&lfs, &cfg));
+  int err;
+
+  LOGOP("format/mount");
+  lfs_format(&lfs, &cfg);
+  MUST_WORK(lfs_mount(&lfs, &cfg));
 #if 0
 
-    // read current count
-    uint32_t boot_count = 0;
-    lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
-    lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
+  // read current count
+  uint32_t boot_count = 0;
+  lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
+  lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
 
-    // update boot count
-    boot_count += 1;
-    lfs_file_rewind(&lfs, &file);
-    lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
+  // update boot count
+  boot_count += 1;
+  lfs_file_rewind(&lfs, &file);
+  lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
 
-    // remember the storage is not updated until the file is closed successfully
-    lfs_file_close(&lfs, &file);
+  // remember the storage is not updated until the file is closed successfully
+  lfs_file_close(&lfs, &file);
 
-    // release any resources we were using
-    lfs_unmount(&lfs);
+  // release any resources we were using
+  lfs_unmount(&lfs);
 
-    // print the boot count
-    printf("boot_count: %d\n", boot_count);
+  // print the boot count
+  printf("boot_count: %d\n", boot_count);
 #endif
-    if (debuglog) {
-      signal(SIGABRT, dump_disk);
-    }
-    run_fuzz_test(stdin, 4);
+  if (debuglog) {
+    signal(SIGABRT, dump_disk);
+  }
+  run_fuzz_test(stdin, 4);
 }
 
 static int hook_abort_after = -1;
-static int hook_last_write_length = 0;
+static uint32_t hook_last_write_length = 0;
 static jmp_buf hook_abort;
 
-static int hook_lfs_rambd_read(const struct lfs_config *cfg, lfs_block_t block,
+static int hook_lfs_rambd_read(const struct lfs_config *lcfg, lfs_block_t block,
         lfs_off_t off, void *buffer, lfs_size_t size) {
   if (hook_abort_after > 0) hook_abort_after--;
 
@@ -234,10 +240,10 @@ static int hook_lfs_rambd_read(const struct lfs_config *cfg, lfs_block_t block,
     longjmp(hook_abort, 1);
   }
 
-  return lfs_rambd_read(cfg, block, off, buffer, size);
+  return lfs_rambd_read(lcfg, block, off, buffer, size);
 }
 
-static int hook_lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
+static int hook_lfs_rambd_prog(const struct lfs_config *lcfg, lfs_block_t block,
         lfs_off_t off, const void *buffer, lfs_size_t size){
   if (hook_abort_after > 0) hook_abort_after--;
 
@@ -260,22 +266,23 @@ static int hook_lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
 
       LOGOP("  Adjusting size %d -> %d before abort\n", size, nsize);
       memcpy(nbuffer, buffer, nsize);
-      memset(nbuffer + nsize, 0xff, size - nsize);
-      lfs_rambd_prog(cfg, block, off, nbuffer, size);
+      memset((char *) nbuffer + nsize, 0xff, size - nsize);
+      lfs_rambd_prog(lcfg, block, off, nbuffer, size);
       free(nbuffer);
     }
     LOGOP(" Failing prog\n");
     longjmp(hook_abort, 1);
   }
 
-  int rc = lfs_rambd_prog(cfg, block, off, buffer, size);
+  int rc = lfs_rambd_prog(lcfg, block, off, buffer, size);
   if (rc < 0) {
     LOGOP("  prog operation was aborted\n");
     longjmp(hook_abort, 1);
   }
+  return rc;
 }
 
-static int hook_lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block) {
+static int hook_lfs_rambd_erase(const struct lfs_config *lcfg, lfs_block_t block) {
   if (hook_abort_after > 0) hook_abort_after--;
 
   if (hook_abort_after == 0) {
@@ -283,10 +290,10 @@ static int hook_lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block)
     longjmp(hook_abort, 1);
   }
 
-  return lfs_rambd_erase(cfg, block);
+  return lfs_rambd_erase(lcfg, block);
 }
 
-static int hook_lfs_rambd_sync(const struct lfs_config *cfg) {
+static int hook_lfs_rambd_sync(const struct lfs_config *lcfg) {
   if (hook_abort_after > 0) hook_abort_after--;
 
   if (hook_abort_after == 0) {
@@ -294,7 +301,7 @@ static int hook_lfs_rambd_sync(const struct lfs_config *cfg) {
     longjmp(hook_abort, 1);
   }
 
-  return lfs_rambd_sync(cfg);
+  return lfs_rambd_sync(lcfg);
 }
 
 #define DUMP_CHANGED {  \
@@ -335,7 +342,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
   memset(openindex, -1, sizeof(openindex));
   char *filename[8];
 
-  int i;
+  uint32_t i;
 
   for (i = 0; i < 8; i++) {
     char buff[128];
@@ -354,7 +361,8 @@ static int run_fuzz_test(FILE *f, int maxfds) {
   }
 
   int command_count = 1;
-  int last_prog_erase = bd.stats.prog_count + bd.stats.erase_count;
+  uint32_t last_prog_erase = bd.stats.prog_count + bd.stats.erase_count;
+  int err;
 
   if (setjmp(hook_abort)) {
     LOGOP("powerfail\n");
@@ -379,8 +387,6 @@ static int run_fuzz_test(FILE *f, int maxfds) {
       break;
     }
     int fdn = ((arg >> 6) & 3) % maxfds;
-    int rc;
-    int err;
     switch(c) {
     case 'O':
       if (openindex[fdn] >= 0) {
@@ -431,11 +437,11 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     case 's':
     {
       int mul = 17 + 2 * (arg & 7);
-      int add = arg >> 3;
+      int addv = arg >> 3;
       for (i = 0; i < sizeof(buff); i++) {
-        buff[i] = i * mul + add;
+        buff[i] = i * mul + addv;
       }
-      LOGOP(" Change data seed to i*%d + %d\n", mul, add);
+      LOGOP(" Change data seed to i*%d + %d\n", mul, addv);
       break;
     }
 
@@ -454,7 +460,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     case 'R':
       if (openindex[fdn] >= 0) {
         LOGOP("  read(%d, , %d)", fdn, (15 << (arg & 7)) + (arg & 127));
-        int err = lfs_file_read(FS, &fd[fdn], rbuff, (15 << (arg & 7)) + (arg & 127));
+        err = lfs_file_read(FS, &fd[fdn], rbuff, (15 << (arg & 7)) + (arg & 127));
         LOGOP(" -> %d\n", err);
         CHECK_ERR;
       }
@@ -463,7 +469,7 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     case 'W':
       if (openindex[fdn] >= 0) {
         LOGOP("  write(%d, , %d)", fdn, (15 << (arg & 7)) + (arg & 127));
-        int err = lfs_file_write(FS, &fd[fdn], buff, (15 << (arg & 7)) + (arg & 127));
+        err = lfs_file_write(FS, &fd[fdn], buff, (15 << (arg & 7)) + (arg & 127));
         LOGOP(" -> %d\n", err);
         CHECK_ERR;
       }
@@ -502,9 +508,9 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     case 'd':
 #ifndef HAVE_REMOVE_OPEN
     {
-      int index = arg & 7;
+      int findex = arg & 7;
       for (i = 0; i < sizeof(openindex) / sizeof(openindex[0]); i++) {
-        if (openindex[i] == index) {
+        if (openindex[i] == findex) {
           break;
         }
       }
@@ -522,9 +528,9 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     case 'r':
 #ifndef HAVE_REMOVE_OPEN
     {
-      int index = arg & 7;
+      int findex = arg & 7;
       for (i = 0; i < sizeof(openindex) / sizeof(openindex[0]); i++) {
-        if (openindex[i] == index) {
+        if (openindex[i] == findex) {
           break;
         }
       }
