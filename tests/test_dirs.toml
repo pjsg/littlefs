@@ -155,7 +155,7 @@ code = '''
 '''
 
 [[case]] # reentrant many directory creation/rename/removal
-define.N = [5, 25]
+define.N = [5, 11]
 reentrant = true
 code = '''
     err = lfs_mount(&lfs, &cfg);

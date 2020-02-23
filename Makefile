@@ -47,7 +47,7 @@ test:
 	./scripts/test.py $(TFLAGS)
 .SECONDEXPANSION:
 test%: tests/test$$(firstword $$(subst \#, ,%)).toml
-	./scripts/test.py $(TFLAGS) $@
+	./scripts/test.py $@ $(TFLAGS)
 
 .PHONY: test_afl
 

@@ -52,7 +52,7 @@ DEFINES = {
     'LFS_LOOKAHEAD_SIZE': 16,
     'LFS_ERASE_VALUE': 0xff,
     'LFS_ERASE_CYCLES': 0,
-    'LFS_BADBLOCK_BEHAVIOR': 'LFS_TESTBD_BADBLOCK_NOPROG',
+    'LFS_BADBLOCK_BEHAVIOR': 'LFS_TESTBD_BADBLOCK_PROGERROR',
 }
 PROLOGUE = """
     // prologue
@@ -182,27 +182,43 @@ class TestCase:
         elif args.get('no_internal', False) and self.in_ is not None:
             return False
         elif self.if_ is not None:
-            return eval(self.if_, None, self.defines.copy())
+            if_ = self.if_
+            while True:
+                for k, v in sorted(self.defines.items(),
+                        key=lambda x: len(x[0]), reverse=True):
+                    if k in if_:
+                        if_ = if_.replace(k, '(%s)' % v)
+                        break
+                else:
+                    break
+            if_ = (
+                re.sub('(\&\&|\?)', ' and ',
+                re.sub('(\|\||:)', ' or ',
+                re.sub('!(?!=)', ' not ', if_))))
+            return eval(if_)
         else:
             return True
 
     def test(self, exec=[], persist=False, cycles=None,
-            gdb=False, failure=None, **args):
+            gdb=False, failure=None, disk=None, **args):
         # build command
         cmd = exec + ['./%s.test' % self.suite.path,
             repr(self.caseno), repr(self.permno)]
 
         # persist disk or keep in RAM for speed?
         if persist:
+            if not disk:
+                disk = self.suite.path + '.disk'
             if persist != 'noerase':
                 try:
-                    os.remove(self.suite.path + '.disk')
+                    with open(disk, 'w') as f:
+                        f.truncate(0)
                     if args.get('verbose', False):
-                        print('rm', self.suite.path + '.disk')
+                        print('truncate --size=0', disk)
                 except FileNotFoundError:
                     pass
 
-            cmd.append(self.suite.path + '.disk')
+            cmd.append(disk)
 
         # simulate power-loss after n cycles?
         if cycles:
@@ -235,33 +251,37 @@ class TestCase:
         mpty = os.fdopen(mpty, 'r', 1)
         stdout = []
         assert_ = None
-        while True:
-            try:
-                line = mpty.readline()
-            except OSError as e:
-                if e.errno == errno.EIO:
-                    break
-                raise
-            stdout.append(line)
-            if args.get('verbose', False):
-                sys.stdout.write(line)
-            # intercept asserts
-            m = re.match(
-                '^{0}([^:]+):(\d+):(?:\d+:)?{0}{1}:{0}(.*)$'
-                .format('(?:\033\[[\d;]*.| )*', 'assert'),
-                line)
-            if m and assert_ is None:
+        try:
+            while True:
                 try:
-                    with open(m.group(1)) as f:
-                        lineno = int(m.group(2))
-                        line = next(it.islice(f, lineno-1, None)).strip('\n')
-                    assert_ = {
-                        'path': m.group(1),
-                        'line': line,
-                        'lineno': lineno,
-                        'message': m.group(3)}
-                except:
-                    pass
+                    line = mpty.readline()
+                except OSError as e:
+                    if e.errno == errno.EIO:
+                        break
+                    raise
+                stdout.append(line)
+                if args.get('verbose', False):
+                    sys.stdout.write(line)
+                # intercept asserts
+                m = re.match(
+                    '^{0}([^:]+):(\d+):(?:\d+:)?{0}{1}:{0}(.*)$'
+                    .format('(?:\033\[[\d;]*.| )*', 'assert'),
+                    line)
+                if m and assert_ is None:
+                    try:
+                        with open(m.group(1)) as f:
+                            lineno = int(m.group(2))
+                            line = (next(it.islice(f, lineno-1, None))
+                                .strip('\n'))
+                        assert_ = {
+                            'path': m.group(1),
+                            'line': line,
+                            'lineno': lineno,
+                            'message': m.group(3)}
+                    except:
+                        pass
+        except KeyboardInterrupt:
+            raise TestFailure(self, 1, stdout, None)
         proc.wait()
 
         # did we pass?
@@ -279,11 +299,17 @@ class ValgrindTestCase(TestCase):
         return not self.leaky and super().shouldtest(**args)
 
     def test(self, exec=[], **args):
-        exec = exec + [
+        verbose = args.get('verbose', False)
+        uninit = (self.defines.get('LFS_ERASE_VALUE', None) == -1)
+        exec = [
             'valgrind',
             '--leak-check=full',
+            ] + (['--undef-value-errors=no'] if uninit else []) + [
+            ] + (['--track-origins=yes'] if not uninit else []) + [
             '--error-exitcode=4',
-            '-q']
+            '--error-limit=no',
+            ] + (['--num-callers=1'] if not verbose else []) + [
+            '-q'] + exec
         return super().test(exec=exec, **args)
 
 class ReentrantTestCase(TestCase):
@@ -294,7 +320,7 @@ class ReentrantTestCase(TestCase):
     def shouldtest(self, **args):
         return self.reentrant and super().shouldtest(**args)
 
-    def test(self, exec=[], persist=False, gdb=False, failure=None, **args):
+    def test(self, persist=False, gdb=False, failure=None, **args):
         for cycles in it.count(1):
             # clear disk first?
             if cycles == 1 and persist != 'noerase':
@@ -360,10 +386,11 @@ class TestSuite:
             # code lineno?
             if 'code' in case:
                 case['code_lineno'] = code_linenos.pop()
-            # give our case's config a copy of our "global" config
-            for k, v in config.items():
-                if k not in case:
-                    case[k] = v
+            # merge conditions if necessary
+            if 'if' in config and 'if' in case:
+                case['if'] = '(%s) && (%s)' % (config['if'], case['if'])
+            elif 'if' in config:
+                case['if'] = config['if']
             # initialize test case
             self.cases.append(TestCase(case, filter=filter,
                 suite=self, caseno=i+1, lineno=lineno, **args))
@@ -654,6 +681,10 @@ def main(**args):
     if filtered != sum(len(suite.perms) for suite in suites):
         print('filtered down to %d permutations' % filtered)
 
+    # only requested to build?
+    if args.get('build', False):
+        return 0
+
     print('====== testing ======')
     try:
         for suite in suites:
@@ -678,18 +709,17 @@ def main(**args):
                         perm=perm, path=perm.suite.path, lineno=perm.lineno,
                         returncode=perm.result.returncode or 0))
                 if perm.result.stdout:
-                    for line in (perm.result.stdout
-                            if not perm.result.assert_
-                            else perm.result.stdout[:-1]):
+                    if perm.result.assert_:
+                        stdout = perm.result.stdout[:-1]
+                    else:
+                        stdout = perm.result.stdout
+                    for line in stdout[-5:]:
                         sys.stdout.write(line)
                 if perm.result.assert_:
                     sys.stdout.write(
                         "\033[01m{path}:{lineno}:\033[01;31massert:\033[m "
                         "{message}\n{line}\n".format(
                             **perm.result.assert_))
-                else:
-                    for line in perm.result.stdout:
-                        sys.stdout.write(line)
                 sys.stdout.write('\n')
                 failed += 1
 
@@ -728,6 +758,8 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--persist', choices=['erase', 'noerase'],
         nargs='?', const='erase',
         help="Store disk image in a file.")
+    parser.add_argument('-b', '--build', action='store_true',
+        help="Only build the tests, do not execute.")
     parser.add_argument('-g', '--gdb', choices=['init', 'start', 'assert'],
         nargs='?', const='assert',
         help="Drop into gdb on test failure.")
@@ -741,4 +773,6 @@ if __name__ == "__main__":
         help="Run non-leaky tests under valgrind to check for memory leaks.")
     parser.add_argument('-e', '--exec', default=[], type=lambda e: e.split(' '),
         help="Run tests with another executable prefixed on the command line.")
+    parser.add_argument('-d', '--disk',
+        help="Specify a file to use for persistent/reentrant tests.")
     sys.exit(main(**vars(parser.parse_args())))
