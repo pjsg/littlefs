@@ -20,7 +20,7 @@
 #include <errno.h>
 #include <setjmp.h>
 
-static int run_fuzz_test(FILE *f, int maxfds);
+static int run_fuzz_test(FILE *f, int maxfds, char *skipitems);
 
 #if 0
 // test stuff
@@ -124,8 +124,8 @@ const struct lfs_config cfg = {
     .lookahead_size = LFS_LOOKAHEAD_SIZE,
 };
 
-#define CHECK_ERR      if (err == LFS_ERR_CORRUPT) abort()
-#define CHECK_RC(call) { err = call; LOGOP(" -> %d\n", err); if (err == LFS_ERR_CORRUPT) abort(); }
+#define CHECK_ERR      if (err == LFS_ERR_CORRUPT) assert(err != LFS_ERR_CORRUPT)
+#define CHECK_RC(call) { err = call; LOGOP(" -> %d\n", err); if (err == LFS_ERR_CORRUPT) assert(err != LFS_ERR_CORRUPT); }
 #define MUST_WORK(call) { err = call; LOGOP(" -> %d\n", err); if (err < 0) { printf("**** " #call " must work and it failed\n"); abort(); }}
 #define LOGOP if (check_duration() || debuglog) printf
 
@@ -194,13 +194,21 @@ static int check_duration(void) {
 int main(int argc, char**argv) {
   int opt;
 
-  while ((opt = getopt(argc, argv, "pR")) > 0) {
+  char skipitems[256];
+  memset(skipitems, 0, sizeof(skipitems));
+
+  while ((opt = getopt(argc, argv, "pRn:")) > 0) {
     switch (opt) {
       case 'p':
         debuglog = 1;
         break;
       case 'R':
         no_open_remove = 1;
+        break;
+      case 'n':
+        for (const char *skip = optarg; *skip; skip++) {
+          skipitems[*skip & 255] = 2;
+        }
         break;
     }
   }
@@ -242,7 +250,7 @@ int main(int argc, char**argv) {
   if (debuglog) {
     signal(SIGABRT, dump_disk);
   }
-  run_fuzz_test(stdin, 4);
+  run_fuzz_test(stdin, 4, skipitems);
 }
 
 static int hook_abort_after = -1;
@@ -331,7 +339,7 @@ static int hook_lfs_rambd_sync(const struct lfs_config *lcfg) {
     } \
 }
 
-static int run_fuzz_test(FILE *f, int maxfds) {
+static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
   // There are a bunch of arbitrary constants in this test case. Changing them will
   // almost certainly change the effets of an input file. It *may* be worth
   // making some of these constants to come from the input file.
@@ -394,17 +402,35 @@ static int run_fuzz_test(FILE *f, int maxfds) {
     }
   }
 
+  if (skipitems['b']) {
+    skipitems['b']++;
+  }
+  if (skipitems['A']) {
+    skipitems['A']++;
+  }
+
   while ((c = fgetc(f)) >= 0) {
     int add;
     char rbuff[2048];
     if (c <= ' ') {
       continue;
     }
+
+    int skip = skipitems[c & 255];
+
+    if (skip) {
+      while (skip-- > 1) {
+        (void) fgetc(f);
+      }
+      continue;
+    }
+
     int arg = fgetc(f);
     if (arg < 0) {
       break;
     }
     int fdn = ((arg >> 6) & 3) % maxfds;
+
     switch(c) {
     case 'O':
       if (openindex[fdn] >= 0) {
