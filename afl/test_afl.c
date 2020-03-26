@@ -134,6 +134,7 @@ static uint32_t last_prog = 0;
 static uint32_t last_erase = 0;
 
 int break_suffix = -1;
+FILE *toml = NULL;
 
 static void dump_disk_suffix(int suffix) {
   char fname[256];
@@ -160,6 +161,12 @@ static void dump_disk_suffix(int suffix) {
 static void dump_disk(int info) {
   (void) info;
   dump_disk_suffix(0);
+}
+
+static void closetoml(int info) {
+  (void) info;
+  fprintf(toml, "\n'''\n");
+  fclose(toml);
 }
 
 struct timeval last;
@@ -196,8 +203,9 @@ int main(int argc, char**argv) {
 
   char skipitems[256];
   memset(skipitems, 0, sizeof(skipitems));
+  char *emit_toml = NULL;
 
-  while ((opt = getopt(argc, argv, "pRn:")) > 0) {
+  while ((opt = getopt(argc, argv, "pRn:t:")) > 0) {
     switch (opt) {
       case 'p':
         debuglog = 1;
@@ -209,6 +217,9 @@ int main(int argc, char**argv) {
         for (const char *skip = optarg; *skip; skip++) {
           skipitems[*skip & 255] = 2;
         }
+        break;
+      case 't':
+        emit_toml = optarg;
         break;
     }
   }
@@ -250,7 +261,21 @@ int main(int argc, char**argv) {
   if (debuglog) {
     signal(SIGABRT, dump_disk);
   }
+
+  if (emit_toml) {
+    toml = fopen(emit_toml, "w");
+    if (!toml) {
+      fprintf(stderr, "Failed to open %s for write\n", emit_toml);
+      exit(1);
+    }
+    fprintf(toml, "[[case]]\ncode = '''\n");
+    signal(SIGABRT, closetoml);
+  }
   run_fuzz_test(stdin, 4, skipitems);
+  if (toml) {
+    fprintf(toml, "\n'''\n");
+    fclose(toml);
+  }
 }
 
 static int hook_abort_after = -1;
@@ -360,15 +385,20 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
 
 #define FS &lfs
 
+#define DO(x) if (toml) { fprintf(toml, "%s\n", #x); } x;
+
   int c;
 
+  DO(
   lfs_file_t fd[4];
+  uint32_t i;
+  )
+
   memset(fd, -1, sizeof(fd));
   int openindex[4];
   memset(openindex, -1, sizeof(openindex));
-  char *filename[8];
 
-  uint32_t i;
+  char *filename[8];
 
   for (i = 0; i < 8; i++) {
     char buff[128];
@@ -381,10 +411,12 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
   int modes[8] = {LFS_O_RDONLY, LFS_O_RDWR, LFS_O_RDWR|LFS_O_TRUNC, LFS_O_RDWR|LFS_O_CREAT, LFS_O_RDWR|LFS_O_CREAT|LFS_O_TRUNC,
       LFS_O_WRONLY|LFS_O_CREAT|LFS_O_TRUNC, LFS_O_RDWR|LFS_O_CREAT|LFS_O_TRUNC, LFS_O_WRONLY};
 
+  DO(
   char buff[2048];
   for (i = 0; i < sizeof(buff); i++) {
     buff[i] = i * 19;
   }
+  )
 
   int command_count = 1;
   uint32_t last_prog_erase = bd.stats.prog_count + bd.stats.erase_count;
@@ -407,6 +439,25 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
   }
   if (skipitems['A']) {
     skipitems['A']++;
+  }
+
+#define EMIT(...) if (toml) fprintf(toml, __VA_ARGS__)
+
+  if (toml) {
+    EMIT("struct lfs_config ncfg = cfg;\n");
+    EMIT("#define cfg ncfg\n");
+
+    EMIT("cfg.read_size      = %d;\n", LFS_READ_SIZE);
+    EMIT("cfg.prog_size      = %d;\n", LFS_PROG_SIZE);
+    EMIT("cfg.block_size     = %d;\n", LFS_BLOCK_SIZE);
+    EMIT("cfg.block_count    = %d;\n", LFS_BLOCK_COUNT);
+    EMIT("cfg.block_cycles   = %d;\n", LFS_BLOCK_CYCLES);
+    EMIT("cfg.cache_size     = %d;\n", LFS_CACHE_SIZE);
+    EMIT("cfg.lookahead_size = %d;\n", LFS_LOOKAHEAD_SIZE);
+    EMIT("lfs_format(&lfs, &cfg) => 0;\n");
+    EMIT("lfs_mount(&lfs, &cfg) => 0;\n");
+
+    EMIT("char rbuff[2048];\n");
   }
 
   while ((c = fgetc(f)) >= 0) {
@@ -435,6 +486,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
     case 'O':
       if (openindex[fdn] >= 0) {
         LOGOP("  close(%d)", fdn);
+        EMIT("lfs_file_close(&lfs, &fd[%d]) => 0;\n", fdn);
         CHECK_RC(lfs_file_close(FS, &fd[fdn]));
         DUMP_CHANGED;
         openindex[fdn] = -1;
@@ -454,6 +506,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
 #endif
       LOGOP("  open(%d, \"%s\", 0x%x)", fdn, filename[(arg>>3) & 7], modes[arg & 7]);
       //memset(&fd[fdn], 0, sizeof(fd[fdn]));
+      EMIT("lfs_file_open(&lfs, &fd[%d], \"%s\", 0x%x) => 0;\n", fdn, filename[(arg>>3) & 7], modes[arg & 7]);
       err = lfs_file_open(FS, &fd[fdn], filename[(arg>>3) & 7], modes[arg & 7]);
       CHECK_ERR;
       if (err >= 0) {
@@ -474,6 +527,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
     case 'A':
     {
       int amnt = fgetc(f) + (arg << 8);
+      EMIT("#error Cannot handle prog aborts yet\n");
       lfs_rambd_prog_abort(&cfg, amnt);
       LOGOP("  Setting prog abort after %d bytes, bitor = %d\n", amnt >> 5, (7 * (amnt & 31)) & 255);
       break;
@@ -486,6 +540,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       for (i = 0; i < sizeof(buff); i++) {
         buff[i] = i * mul + addv;
       }
+      EMIT("for (i = 0; i < sizeof(buff); i++) { buff[i] = i * %d + %d; }\n", mul, addv);
       LOGOP(" Change data seed to i*%d + %d\n", mul, addv);
       break;
     }
@@ -498,6 +553,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
         }
         int whence = (arg & 63) % 3;
         LOGOP("  seek(%d, %d, %d)", fdn, offset, whence);
+        EMIT("lfs_file_seek(&lfs, &fd[%d], %d, %d) => 0;\n", fdn, offset, whence);
         CHECK_RC(lfs_file_seek(FS, &fd[fdn], offset, whence));
       }
       break;
@@ -505,7 +561,9 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
     case 'R':
       if (openindex[fdn] >= 0) {
         LOGOP("  read(%d, , %d)", fdn, (15 << (arg & 7)) + (arg & 127));
+        EMIT("lfs_file_read(&lfs, &fd[%d], rbuff, %d) => ", fdn, (15 << (arg & 7)) + (arg & 127));
         err = lfs_file_read(FS, &fd[fdn], rbuff, (15 << (arg & 7)) + (arg & 127));
+        EMIT(" %d;\n", err);
         LOGOP(" -> %d\n", err);
         CHECK_ERR;
       }
@@ -514,6 +572,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
     case 'W':
       if (openindex[fdn] >= 0) {
         LOGOP("  write(%d, , %d)", fdn, (15 << (arg & 7)) + (arg & 127));
+        EMIT("lfs_file_write(&lfs, &fd[%d], buff, %d) => %d;\n", fdn, (15 << (arg & 7)) + (arg & 127), (15 << (arg & 7)) + (arg & 127));
         err = lfs_file_write(FS, &fd[fdn], buff, (15 << (arg & 7)) + (arg & 127));
         LOGOP(" -> %d\n", err);
         CHECK_ERR;
@@ -523,6 +582,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
     case 'C':
       if (openindex[fdn] >= 0) {
         LOGOP("  close(%d)", fdn);
+        EMIT("lfs_file_close(&lfs, &fd[%d]) => 0;\n", fdn);
         CHECK_RC(lfs_file_close(FS, &fd[fdn]));
       }
       openindex[fdn] = -1;
@@ -530,6 +590,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
 
     case 'b':
       add = fgetc(f);
+      EMIT("for (i = 0; i < sizeof(buff); i++) { buff[i] = i * %d + %d; }\n", arg, add);
       for (i = 0; i < sizeof(buff); i++) {
         buff[i] = add + i * arg;
       }
@@ -539,6 +600,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       if (openindex[fdn] >= 0) {
         add = fgetc(f) * 17;
         LOGOP("  truncate(%d, %d)", fdn, add);
+        EMIT("lfs_file_truncate(&lfs, &fd[%d], %d) => 0;\n", fdn, add);
         CHECK_RC(lfs_file_truncate(FS, &fd[fdn], add));
       }
       break;
@@ -546,6 +608,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
     case 'f':
       if (openindex[fdn] >= 0) {
         LOGOP("  sync(%d)", fdn);
+        EMIT("lfs_file_sync(&lfs, &fd[%d]) => 0;\n", fdn);
         CHECK_RC(lfs_file_sync(FS, &fd[fdn]));
       }
       break;
@@ -563,7 +626,9 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       }
     }
     LOGOP("  remove(\"%s\")", filename[arg & 7]);
+    EMIT("lfs_remove(&lfs, \"%s\") => ", filename[arg & 7]);
     err = lfs_remove(FS, filename[arg & 7]);
+    EMIT(" %d;\n", err);
     LOGOP(" -> %d\n", err);
     CHECK_ERR;
     break;
@@ -581,7 +646,9 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       }
     }
     LOGOP("  rename(\"%s\", \"%s\")", filename[arg & 7], filename[(arg >> 3) & 7]);
+    EMIT("lfs_rename(&lfs, \"%s\", \"%s\") => ", filename[arg & 7], filename[(arg >> 3) & 7]);
     err = lfs_rename(FS, filename[arg & 7], filename[(arg >> 3) & 7]);
+    EMIT(" %d;\n", err);
     LOGOP(" -> %d\n", err);
     CHECK_ERR;
     break;
@@ -593,10 +660,12 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       {
         if (arg & 0x01) {
           LOGOP("  unmount\n");
+          EMIT("lfs_unmount(&lfs) => 0;\n");
           lfs_unmount(FS);
         }
 
         LOGOP("  mount");
+        EMIT("lfs_mount(&lfs, &cfg) => 0;\n");
         MUST_WORK(lfs_mount(FS, &cfg));
       }
       break;
@@ -623,6 +692,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
   for (i = 0; i < 4; i++) {
     if (openindex[i] >= 0) {
       LOGOP("  finally close(%d)", i);
+      EMIT("lfs_file_close(&lfs, &fd[%d]) => 0;\n", i);
       CHECK_RC(lfs_file_close(FS, &fd[i]));
     }
   }
