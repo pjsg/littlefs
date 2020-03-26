@@ -127,9 +127,9 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
     for (lfs_off_t i = 0; i < size; i++) {
         int8_t current = bd->buffer[block*cfg->block_size + off + i];
         uint8_t new_value = ((uint8_t *)buffer)[i];
-        if (current != bd->cfg->erase_value) {
-          printf("\nTrying to program 0x%02x into location with value 0x%02x [at offset 0x%x (in block %d) in a length of %d]\n",
-              new_value, current, i + off, block, size);
+        if ((current & 0xff) != (bd->cfg->erase_value & 0xff)) {
+          printf("\nTrying to program 0x%02x into location with value 0x%02x (ought to be 0x%02x) [at offset 0x%x (in block %d) in a length of %d]\n",
+              new_value, current & 0xff,  bd->cfg->erase_value & 0xff, i + off, block, size);
           LFS_ASSERT(current == bd->cfg->erase_value);
         }
     }
