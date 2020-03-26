@@ -151,6 +151,7 @@ code = '''
             LFS_MKTAG(0x700, 0x3ff, 0),
             LFS_MKTAG(LFS_TYPE_STRUCT, 1, sizeof(struct lfs_ctz)), &ctz)
                 => LFS_MKTAG(LFS_TYPE_CTZSTRUCT, 1, sizeof(struct lfs_ctz));
+    lfs_ctz_fromle32(&ctz);
     // rewrite block to contain bad pointer
     uint8_t bbuffer[LFS_BLOCK_SIZE];
     cfg.read(&cfg, ctz.head, 0, bbuffer, LFS_BLOCK_SIZE) => 0;
@@ -245,6 +246,7 @@ code = '''
             LFS_MKTAG(0x7ff, 0x3ff, 0),
             LFS_MKTAG(LFS_TYPE_DIRSTRUCT, 1, sizeof(pair)), pair)
                 => LFS_MKTAG(LFS_TYPE_DIRSTRUCT, 1, sizeof(pair));
+    lfs_pair_fromle32(pair);
     // change tail-pointer to point to root
     lfs_dir_fetch(&lfs, &mdir, pair) => 0;
     lfs_dir_commit(&lfs, &mdir, LFS_MKATTRS(
@@ -274,6 +276,7 @@ code = '''
             LFS_MKTAG(0x7ff, 0x3ff, 0),
             LFS_MKTAG(LFS_TYPE_DIRSTRUCT, 1, sizeof(pair)), pair)
                 => LFS_MKTAG(LFS_TYPE_DIRSTRUCT, 1, sizeof(pair));
+    lfs_pair_fromle32(pair);
     // change tail-pointer to point to ourself
     lfs_dir_fetch(&lfs, &mdir, pair) => 0;
     lfs_dir_commit(&lfs, &mdir, LFS_MKATTRS(
