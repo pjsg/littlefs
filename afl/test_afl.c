@@ -457,7 +457,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
     EMIT("lfs_format(&lfs, &cfg) => 0;\n");
     EMIT("lfs_mount(&lfs, &cfg) => 0;\n");
 
-    EMIT("char rbuff[2048];\n");
+    EMIT("char rbuff[2048];\nrbuff[0] = 0; // Reference this buffer\n");
   }
 
   while ((c = fgetc(f)) >= 0) {
