@@ -40,7 +40,7 @@ typedef struct lfs_rambd {
 
 // Create a RAM block device using the geometry in lfs_config
 int lfs_rambd_create(const struct lfs_config *cfg);
-int lfs_rambd_create_mmap(const struct lfs_config *cfg, const char *filename);
+int lfs_rambd_createcfg_mmap(const struct lfs_config *cfg, const struct lfs_rambd_config *bdcfg, const char *filename);
 int lfs_rambd_createcfg(const struct lfs_config *cfg,
         const struct lfs_rambd_config *bdcfg);
 

@@ -9,6 +9,15 @@
 
 #include <stdlib.h>
 
+static void handle_powerfail(lfs_testbd_t *bd) {
+    if (bd->powerfail_after <= 0) {
+      return;
+    }
+    bd->powerfail_after--;
+    if (bd->powerfail_after == 0) {
+      longjmp(bd->powerfail, 1);
+    }
+}
 
 int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
         const struct lfs_testbd_config *bdcfg) {
@@ -31,7 +40,6 @@ int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
     bd->cfg = bdcfg;
 
     // setup testing things
-    bd->persist = path;
     bd->power_cycles = bd->cfg->power_cycles;
 
     if (bd->cfg->erase_cycles) {
@@ -48,23 +56,22 @@ int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
         memset(bd->wear, 0, sizeof(lfs_testbd_wear_t) * cfg->block_count);
     }
 
+    ((struct lfs_testbd_config *) bdcfg)->ram_cfg = *cfg;
+    ((struct lfs_testbd_config *) bdcfg)->ram_cfg.prog_size = 1;
+
     // create underlying block device
-    if (bd->persist) {
-        bd->u.file.cfg = (struct lfs_filebd_config){
-            .erase_value = bd->cfg->erase_value,
-        };
-        int err = lfs_filebd_createcfg(cfg, path, &bd->u.file.cfg);
-        LFS_TRACE("lfs_testbd_createcfg -> %d", err);
-        return err;
+    bd->u.ram.cfg = (struct lfs_rambd_config){
+        .erase_value = bd->cfg->erase_value,
+        .buffer = bd->cfg->buffer,
+    };
+    int err;
+    if (path) {
+      err = lfs_rambd_createcfg_mmap(&bd->cfg->ram_cfg, &bd->u.ram.cfg, path);
     } else {
-        bd->u.ram.cfg = (struct lfs_rambd_config){
-            .erase_value = bd->cfg->erase_value,
-            .buffer = bd->cfg->buffer,
-        };
-        int err = lfs_rambd_createcfg(cfg, &bd->u.ram.cfg);
-        LFS_TRACE("lfs_testbd_createcfg -> %d", err);
-        return err;
+      err = lfs_rambd_createcfg(&bd->cfg->ram_cfg, &bd->u.ram.cfg);
     }
+    LFS_TRACE("lfs_testbd_createcfg -> %d", err);
+    return err;
 }
 
 int lfs_testbd_create(const struct lfs_config *cfg, const char *path) {
@@ -78,8 +85,10 @@ int lfs_testbd_create(const struct lfs_config *cfg, const char *path) {
             (void*)(uintptr_t)cfg->erase, (void*)(uintptr_t)cfg->sync,
             cfg->read_size, cfg->prog_size, cfg->block_size, cfg->block_count,
             path);
-    static const struct lfs_testbd_config defaults = {.erase_value=-1};
-    int err = lfs_testbd_createcfg(cfg, path, &defaults);
+    static const struct lfs_testbd_config const_defaults = {.erase_value=-1};
+    struct lfs_testbd_config *defaults = (struct lfs_testbd_config *) malloc(sizeof(*defaults));
+    *defaults = const_defaults;
+    int err = lfs_testbd_createcfg(cfg, path, defaults);
     LFS_TRACE("lfs_testbd_create -> %d", err);
     return err;
 }
@@ -91,55 +100,71 @@ int lfs_testbd_destroy(const struct lfs_config *cfg) {
         lfs_free(bd->wear);
     }
 
-    if (bd->persist) {
-        int err = lfs_filebd_destroy(cfg);
-        LFS_TRACE("lfs_testbd_destroy -> %d", err);
-        return err;
-    } else {
-        int err = lfs_rambd_destroy(cfg);
-        LFS_TRACE("lfs_testbd_destroy -> %d", err);
-        return err;
-    }
+    int err = lfs_rambd_destroy(&bd->cfg->ram_cfg);
+    LFS_TRACE("lfs_testbd_destroy -> %d", err);
+    return err;
 }
 
 /// Internal mapping to block devices ///
 static int lfs_testbd_rawread(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, void *buffer, lfs_size_t size) {
     lfs_testbd_t *bd = cfg->context;
-    if (bd->persist) {
-        return lfs_filebd_read(cfg, block, off, buffer, size);
-    } else {
-        return lfs_rambd_read(cfg, block, off, buffer, size);
-    }
+    handle_powerfail(bd);
+    return lfs_rambd_read(&bd->cfg->ram_cfg, block, off, buffer, size);
 }
 
 static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, const void *buffer, lfs_size_t size) {
     lfs_testbd_t *bd = cfg->context;
-    if (bd->persist) {
-        return lfs_filebd_prog(cfg, block, off, buffer, size);
-    } else {
-        return lfs_rambd_prog(cfg, block, off, buffer, size);
+    int do_powerfail = 0;
+    int rc;
+
+    handle_powerfail(bd);
+    lfs_size_t nsize = size;
+    if (bd->powerfail_after > 0 && (bd->powerfail_after >> 5) < (int) nsize) {
+      nsize = bd->powerfail_after >> 5;
+      do_powerfail = 1;
+      printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Wrote %d bytes.\n",
+             size, off, block, nsize);
     }
+    rc = lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, buffer, nsize);
+    if (rc) {
+      return rc;
+    }
+    bd->powerfail_after -= nsize << 5;
+    off += nsize;
+    size -= nsize;
+
+    if (size && bd->powerfail_after) {
+        // need to do a few bits in the last byte
+        uint8_t last_byte = ((uint8_t *) buffer)[nsize] | (7 * bd->powerfail_after);
+        bd->powerfail_after = 0;
+        do_powerfail = 1;
+        printf("Byte at offset 0x%x should have been 0x%02x, but wrote 0x%02x instead.\n",
+               off, ((uint8_t *) buffer)[nsize], last_byte);
+        rc = lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, &last_byte, 1);
+        if (rc) {
+          return rc;
+        }
+    }
+    if (do_powerfail) {
+        longjmp(bd->powerfail, 1);
+    }
+
+    return 0;
 }
 
 static int lfs_testbd_rawerase(const struct lfs_config *cfg,
         lfs_block_t block) {
     lfs_testbd_t *bd = cfg->context;
-    if (bd->persist) {
-        return lfs_filebd_erase(cfg, block);
-    } else {
-        return lfs_rambd_erase(cfg, block);
-    }
+    handle_powerfail(bd);
+    return lfs_rambd_erase(&bd->cfg->ram_cfg, block);
 }
 
 static int lfs_testbd_rawsync(const struct lfs_config *cfg) {
     lfs_testbd_t *bd = cfg->context;
-    if (bd->persist) {
-        return lfs_filebd_sync(cfg);
-    } else {
-        return lfs_rambd_sync(cfg);
-    }
+    handle_powerfail(bd);
+    return lfs_rambd_sync(&bd->cfg->ram_cfg);
 }
 
 /// block device API ///
@@ -297,4 +322,12 @@ int lfs_testbd_setwear(const struct lfs_config *cfg,
 
     LFS_TRACE("lfs_testbd_setwear -> %d", 0);
     return 0;
+}
+
+void lfs_testbd_setpowerfail(const struct lfs_config *cfg, int powerfail_after, jmp_buf powerfail) {
+    LFS_TRACE("lfs_testbd_setpowerfail(%p, %"PRIu32")", (void*)cfg, powerfail_after);
+    lfs_testbd_t *bd = cfg->context;
+
+    bd->powerfail_after = powerfail_after;
+    memcpy(bd->powerfail, powerfail, sizeof(jmp_buf));
 }

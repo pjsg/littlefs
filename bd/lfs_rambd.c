@@ -24,8 +24,6 @@ int lfs_rambd_createcfg(const struct lfs_config *cfg,
     lfs_rambd_t *bd = cfg->context;
     bd->cfg = bdcfg;
 
-    bd->prog_abort_bits = 0;
-
     // allocate buffer?
     if (bd->cfg->buffer) {
         bd->buffer = bd->cfg->buffer;
@@ -45,7 +43,8 @@ int lfs_rambd_createcfg(const struct lfs_config *cfg,
     return 0;
 }
 
-int lfs_rambd_create_mmap(const struct lfs_config *cfg, const char *filename) {
+int lfs_rambd_createcfg_mmap(const struct lfs_config *cfg, 
+                            const struct lfs_rambd_config *bdcfg, const char *filename) {
     LFS_TRACE("lfs_rambd_create(%p {.context=%p, "
                 ".read=%p, .prog=%p, .erase=%p, .sync=%p, "
                 ".read_size=%"PRIu32", .prog_size=%"PRIu32", "
@@ -61,7 +60,7 @@ int lfs_rambd_create_mmap(const struct lfs_config *cfg, const char *filename) {
     write(fd, buffer, cfg->block_size * cfg->block_count);
     free(buffer);
     defaults.buffer = mmap(0, cfg->block_size * cfg->block_count, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-    int err = lfs_rambd_createcfg(cfg, &defaults);
+    int err = lfs_rambd_createcfg(cfg, bdcfg);
     LFS_TRACE("lfs_rambd_create -> %d", err);
     return err;
 }
@@ -106,8 +105,6 @@ int lfs_rambd_read(const struct lfs_config *cfg, lfs_block_t block,
     // read data
     memcpy(buffer, &bd->buffer[block*cfg->block_size + off], size);
 
-    bd->stats.read_count += size;
-
     LFS_TRACE("lfs_rambd_read -> %d", 0);
     return 0;
 }
@@ -137,35 +134,9 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
     int rc = 0;
 
     // program data
-    lfs_size_t nsize = size;
-    if (bd->prog_abort_bits > 0 && (bd->prog_abort_bits >> 5) < nsize) {
-      nsize = bd->prog_abort_bits >> 5;
-      rc = -1;
-      printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Wrote %d bytes.\n",
-         size, off, block, nsize);
-    }
-    memcpy(&bd->buffer[block*cfg->block_size + off], buffer, nsize);
-    bd->prog_abort_bits -= nsize << 5;
-    off += nsize;
-    size -= nsize;
-    bd->stats.prog_count += nsize;
-
-    if (size && bd->prog_abort_bits) {
-      // need to do a few bits in the last byte
-      bd->buffer[block * cfg->block_size + off] = ((uint8_t *) buffer)[nsize] | (7 * bd->prog_abort_bits);
-      bd->prog_abort_bits = 0;
-      rc = -1;
-      printf("Byte at offset 0x%x should have been 0x%02x, but wrote 0x%02x instead.\n",
-         off, ((uint8_t *) buffer)[nsize], bd->buffer[block * cfg->block_size + off]);
-    }
-
+    memcpy(&bd->buffer[block*cfg->block_size + off], buffer, size);
     LFS_TRACE("lfs_rambd_prog -> %d", rc);
     return rc;
-}
-
-void lfs_rambd_prog_abort(const struct lfs_config *cfg, unsigned int abort_bits) {
-    lfs_rambd_t *bd = cfg->context;
-    bd->prog_abort_bits = abort_bits;
 }
 
 int lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block) {
@@ -178,8 +149,6 @@ int lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block) {
     // erase, only needed for testing
     memset(&bd->buffer[block*cfg->block_size],
             bd->cfg->erase_value, cfg->block_size);
-
-    bd->stats.erase_count++;
 
     LFS_TRACE("lfs_rambd_erase -> %d", 0);
     return 0;

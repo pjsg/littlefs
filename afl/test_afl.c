@@ -8,6 +8,7 @@
 
 #include "lfs.h"
 #include "bd/lfs_rambd.h"
+#include "bd/lfs_testbd.h"
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
@@ -51,7 +52,7 @@ static int __attribute__((used)) test_count(void *p, lfs_block_t b) {{
 
 // lfs declarations
 lfs_t lfs;
-lfs_rambd_t bd;
+lfs_testbd_t bd;
 // other declarations for convenience
 lfs_file_t file;
 lfs_dir_t dir;
@@ -96,24 +97,14 @@ int no_open_remove;
 #endif
 
 
-static int hook_lfs_rambd_read(const struct lfs_config *cfg, lfs_block_t block,
-        lfs_off_t off, void *buffer, lfs_size_t size);
-
-static int hook_lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
-        lfs_off_t off, const void *buffer, lfs_size_t size);
-
-static int hook_lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block);
-
-static int hook_lfs_rambd_sync(const struct lfs_config *cfg);
-
 
 
 const struct lfs_config cfg = {
     .context = &bd,
-    .read  = &hook_lfs_rambd_read,
-    .prog  = &hook_lfs_rambd_prog,
-    .erase = &hook_lfs_rambd_erase,
-    .sync  = &hook_lfs_rambd_sync,
+    .read  = &lfs_testbd_read,
+    .prog  = &lfs_testbd_prog,
+    .erase = &lfs_testbd_erase,
+    .sync  = &lfs_testbd_sync,
 
     .read_size      = LFS_READ_SIZE,
     .prog_size      = LFS_PROG_SIZE,
@@ -225,9 +216,9 @@ int main(int argc, char**argv) {
   }
 
   if (debuglog) {
-    lfs_rambd_create_mmap(&cfg, "/tmp/littlefs-live-disk");
+    lfs_testbd_create(&cfg, "/tmp/littlefs-live-disk");
   } else {
-    lfs_rambd_create(&cfg);
+    lfs_testbd_create(&cfg, NULL);
   }
 
   gettimeofday(&last, 0);
@@ -278,82 +269,7 @@ int main(int argc, char**argv) {
   }
 }
 
-static int hook_abort_after = -1;
-static uint32_t hook_last_write_length = 0;
 static jmp_buf hook_abort;
-
-static int hook_lfs_rambd_read(const struct lfs_config *lcfg, lfs_block_t block,
-        lfs_off_t off, void *buffer, lfs_size_t size) {
-  if (hook_abort_after > 0) hook_abort_after--;
-
-  if (hook_abort_after == 0) {
-    LOGOP(" Failing read\n");
-    longjmp(hook_abort, 1);
-  }
-
-  return lfs_rambd_read(lcfg, block, off, buffer, size);
-}
-
-static int hook_lfs_rambd_prog(const struct lfs_config *lcfg, lfs_block_t block,
-        lfs_off_t off, const void *buffer, lfs_size_t size){
-  if (hook_abort_after > 0) hook_abort_after--;
-
-  if (hook_abort_after == 0) {
-    if (hook_last_write_length != 0) {
-      void *nbuffer = malloc(size);
-
-      lfs_size_t nsize = size;
-
-      if (hook_last_write_length < 128) {
-        if (nsize > hook_last_write_length) {
-          nsize = hook_last_write_length;
-        }
-      } else {
-        hook_last_write_length = 256 - hook_last_write_length;
-        if (nsize > hook_last_write_length) {
-          nsize -= hook_last_write_length;
-        }
-      }
-
-      LOGOP("  Adjusting size %d -> %d before abort\n", size, nsize);
-      memcpy(nbuffer, buffer, nsize);
-      memset((char *) nbuffer + nsize, 0xff, size - nsize);
-      lfs_rambd_prog(lcfg, block, off, nbuffer, size);
-      free(nbuffer);
-    }
-    LOGOP(" Failing prog\n");
-    longjmp(hook_abort, 1);
-  }
-
-  int rc = lfs_rambd_prog(lcfg, block, off, buffer, size);
-  if (rc < 0) {
-    LOGOP("  prog operation was aborted\n");
-    longjmp(hook_abort, 1);
-  }
-  return rc;
-}
-
-static int hook_lfs_rambd_erase(const struct lfs_config *lcfg, lfs_block_t block) {
-  if (hook_abort_after > 0) hook_abort_after--;
-
-  if (hook_abort_after == 0) {
-    LOGOP(" Failing prog\n");
-    longjmp(hook_abort, 1);
-  }
-
-  return lfs_rambd_erase(lcfg, block);
-}
-
-static int hook_lfs_rambd_sync(const struct lfs_config *lcfg) {
-  if (hook_abort_after > 0) hook_abort_after--;
-
-  if (hook_abort_after == 0) {
-    LOGOP(" Failing sync\n");
-    longjmp(hook_abort, 1);
-  }
-
-  return lfs_rambd_sync(lcfg);
-}
 
 #define DUMP_CHANGED {  \
     if (debuglog && last_prog_erase != bd.stats.prog_count + bd.stats.erase_count) { \
@@ -416,17 +332,44 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
   for (i = 0; i < sizeof(buff); i++) {
     buff[i] = i * 19;
   }
+  jmp_buf powerfail;
+  (void) powerfail;
   )
+
+  int powerfail_index = 0;
+
+#define EMIT(...) if (toml) fprintf(toml, __VA_ARGS__)
+
+  if (toml) {
+    if (0) {
+    EMIT("struct lfs_config ncfg = cfg;\n");
+    EMIT("#define cfg ncfg\n");
+
+    EMIT("cfg.read_size      = %d;\n", LFS_READ_SIZE);
+    EMIT("cfg.prog_size      = %d;\n", LFS_PROG_SIZE);
+    EMIT("cfg.block_size     = %d;\n", LFS_BLOCK_SIZE);
+    EMIT("cfg.block_count    = %d;\n", LFS_BLOCK_COUNT);
+    EMIT("cfg.block_cycles   = %d;\n", LFS_BLOCK_CYCLES);
+    EMIT("cfg.cache_size     = %d;\n", LFS_CACHE_SIZE);
+    EMIT("cfg.lookahead_size = %d;\n", LFS_LOOKAHEAD_SIZE);
+    }
+    EMIT("lfs_format(&lfs, &cfg) => 0;\n");
+    EMIT("lfs_mount(&lfs, &cfg) => 0;\n");
+
+    EMIT("char rbuff[2048];\nrbuff[0] = 0; // Reference this buffer\n");
+  }
 
   int command_count = 1;
   uint32_t last_prog_erase = bd.stats.prog_count + bd.stats.erase_count;
   int err;
 
   if (setjmp(hook_abort)) {
+    EMIT(";\n// POWERFAIL ==========================\n");
+    EMIT("powerfail%d:\n", powerfail_index++);
     LOGOP("powerfail\n");
-    hook_abort_after = -1;
 
     LOGOP("  mount");
+    EMIT("lfs_mount(&lfs, &cfg) => 0;\n");
     MUST_WORK(lfs_mount(FS, &cfg));
 
     for (i = 0; i < 4; i++) {
@@ -439,25 +382,6 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
   }
   if (skipitems['A']) {
     skipitems['A']++;
-  }
-
-#define EMIT(...) if (toml) fprintf(toml, __VA_ARGS__)
-
-  if (toml) {
-    EMIT("struct lfs_config ncfg = cfg;\n");
-    EMIT("#define cfg ncfg\n");
-
-    EMIT("cfg.read_size      = %d;\n", LFS_READ_SIZE);
-    EMIT("cfg.prog_size      = %d;\n", LFS_PROG_SIZE);
-    EMIT("cfg.block_size     = %d;\n", LFS_BLOCK_SIZE);
-    EMIT("cfg.block_count    = %d;\n", LFS_BLOCK_COUNT);
-    EMIT("cfg.block_cycles   = %d;\n", LFS_BLOCK_CYCLES);
-    EMIT("cfg.cache_size     = %d;\n", LFS_CACHE_SIZE);
-    EMIT("cfg.lookahead_size = %d;\n", LFS_LOOKAHEAD_SIZE);
-    EMIT("lfs_format(&lfs, &cfg) => 0;\n");
-    EMIT("lfs_mount(&lfs, &cfg) => 0;\n");
-
-    EMIT("char rbuff[2048];\nrbuff[0] = 0; // Reference this buffer\n");
   }
 
   while ((c = fgetc(f)) >= 0) {
@@ -506,8 +430,9 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
 #endif
       LOGOP("  open(%d, \"%s\", 0x%x)", fdn, filename[(arg>>3) & 7], modes[arg & 7]);
       //memset(&fd[fdn], 0, sizeof(fd[fdn]));
-      EMIT("lfs_file_open(&lfs, &fd[%d], \"%s\", 0x%x) => 0;\n", fdn, filename[(arg>>3) & 7], modes[arg & 7]);
+      EMIT("lfs_file_open(&lfs, &fd[%d], \"%s\", 0x%x) ", fdn, filename[(arg>>3) & 7], modes[arg & 7]);
       err = lfs_file_open(FS, &fd[fdn], filename[(arg>>3) & 7], modes[arg & 7]);
+      EMIT("=> %d;\n", err);
       CHECK_ERR;
       if (err >= 0) {
         openindex[fdn] = (arg >> 3) & 7;
@@ -515,20 +440,12 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       LOGOP(" -> %d\n", err);
       break;
 
-    case 'p':
-      hook_abort_after = arg + 1;
-      LOGOP("  Setting powerfail in %d accesses\n", hook_abort_after);
-      break;
-
-    case 'P':
-      hook_last_write_length = arg;
-      break;
-
     case 'A':
     {
       int amnt = fgetc(f) + (arg << 8);
-      EMIT("#error Cannot handle prog aborts yet\n");
-      lfs_rambd_prog_abort(&cfg, amnt);
+      lfs_testbd_setpowerfail(&cfg, amnt, hook_abort);
+      EMIT("if (setjmp(powerfail)) { goto powerfail%d; }\n", powerfail_index);
+      EMIT("lfs_testbd_setpowerfail(&cfg, %d, powerfail);\n", amnt);
       LOGOP("  Setting prog abort after %d bytes, bitor = %d\n", amnt >> 5, (7 * (amnt & 31)) & 255);
       break;
     }
@@ -553,17 +470,18 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
         }
         int whence = (arg & 63) % 3;
         LOGOP("  seek(%d, %d, %d)", fdn, offset, whence);
-        EMIT("lfs_file_seek(&lfs, &fd[%d], %d, %d) => 0;\n", fdn, offset, whence);
+        EMIT("lfs_file_seek(&lfs, &fd[%d], %d, %d) ", fdn, offset, whence);
         CHECK_RC(lfs_file_seek(FS, &fd[fdn], offset, whence));
+        EMIT("=> %d;\n", err);
       }
       break;
 
     case 'R':
       if (openindex[fdn] >= 0) {
         LOGOP("  read(%d, , %d)", fdn, (15 << (arg & 7)) + (arg & 127));
-        EMIT("lfs_file_read(&lfs, &fd[%d], rbuff, %d) => ", fdn, (15 << (arg & 7)) + (arg & 127));
+        EMIT("lfs_file_read(&lfs, &fd[%d], rbuff, %d) ", fdn, (15 << (arg & 7)) + (arg & 127));
         err = lfs_file_read(FS, &fd[fdn], rbuff, (15 << (arg & 7)) + (arg & 127));
-        EMIT(" %d;\n", err);
+        EMIT("=> %d;\n", err);
         LOGOP(" -> %d\n", err);
         CHECK_ERR;
       }
@@ -626,9 +544,9 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       }
     }
     LOGOP("  remove(\"%s\")", filename[arg & 7]);
-    EMIT("lfs_remove(&lfs, \"%s\") => ", filename[arg & 7]);
+    EMIT("lfs_remove(&lfs, \"%s\") ", filename[arg & 7]);
     err = lfs_remove(FS, filename[arg & 7]);
-    EMIT(" %d;\n", err);
+    EMIT("=> %d;\n", err);
     LOGOP(" -> %d\n", err);
     CHECK_ERR;
     break;
@@ -646,9 +564,9 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       }
     }
     LOGOP("  rename(\"%s\", \"%s\")", filename[arg & 7], filename[(arg >> 3) & 7]);
-    EMIT("lfs_rename(&lfs, \"%s\", \"%s\") => ", filename[arg & 7], filename[(arg >> 3) & 7]);
+    EMIT("lfs_rename(&lfs, \"%s\", \"%s\") ", filename[arg & 7], filename[(arg >> 3) & 7]);
     err = lfs_rename(FS, filename[arg & 7], filename[(arg >> 3) & 7]);
-    EMIT(" %d;\n", err);
+    EMIT("=> %d;\n", err);
     LOGOP(" -> %d\n", err);
     CHECK_ERR;
     break;

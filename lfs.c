@@ -815,7 +815,8 @@ static lfs_stag_t lfs_dir_fetchmatch(lfs_t *lfs,
                 dir->erased = (lfs_tag_type1(ptag) == LFS_TYPE_CRC &&
                         dir->off % lfs->cfg->prog_size == 0);
                 // TODO Fix the above condition. THe line below is TEMPORARY.
-                dir->erased = false;
+                // And it causes its own issues
+                // dir->erased = false;
                 break;
             } else if (off + lfs_tag_dsize(tag) > lfs->cfg->block_size) {
                 dir->erased = false;

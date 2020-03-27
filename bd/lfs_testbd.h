@@ -12,6 +12,7 @@
 #include "lfs_util.h"
 #include "bd/lfs_rambd.h"
 #include "bd/lfs_filebd.h"
+#include <setjmp.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -60,15 +61,13 @@ struct lfs_testbd_config {
 
     // Optional buffer for wear
     void *wear_buffer;
+
+    struct lfs_config ram_cfg;
 };
 
 // testbd state
 typedef struct lfs_testbd {
     union {
-        struct {
-            lfs_filebd_t bd;
-            struct lfs_filebd_config cfg;
-        } file;
         struct {
             lfs_rambd_t bd;
             struct lfs_rambd_config cfg;
@@ -78,6 +77,18 @@ typedef struct lfs_testbd {
     bool persist;
     uint32_t power_cycles;
     lfs_testbd_wear_t *wear;
+    //
+    // powerfail after operation count
+    int powerfail_after;
+
+    // Where to go on powerfail
+    jmp_buf powerfail;
+
+    struct {
+      unsigned int read_count;
+      unsigned int prog_count;
+      unsigned int erase_count;
+    } stats;
 
     const struct lfs_testbd_config *cfg;
 } lfs_testbd_t;
@@ -126,6 +137,7 @@ lfs_testbd_swear_t lfs_testbd_getwear(const struct lfs_config *cfg,
 int lfs_testbd_setwear(const struct lfs_config *cfg,
         lfs_block_t block, lfs_testbd_wear_t wear);
 
+void lfs_testbd_setpowerfail(const struct lfs_config *cfg, int powerfail_after, jmp_buf powerfail);
 
 #ifdef __cplusplus
 } /* extern "C" */
