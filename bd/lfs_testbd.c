@@ -110,6 +110,7 @@ static int lfs_testbd_rawread(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, void *buffer, lfs_size_t size) {
     lfs_testbd_t *bd = cfg->context;
     handle_powerfail(bd);
+    bd->stats.read_count += size;
     return lfs_rambd_read(&bd->cfg->ram_cfg, block, off, buffer, size);
 }
 
@@ -134,6 +135,7 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
     bd->powerfail_after -= nsize << 5;
     off += nsize;
     size -= nsize;
+    bd->stats.prog_count += nsize;
 
     if (size && bd->powerfail_after) {
         // need to do a few bits in the last byte
@@ -158,6 +160,7 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
         lfs_block_t block) {
     lfs_testbd_t *bd = cfg->context;
     handle_powerfail(bd);
+    bd->stats.erase_count++;
     return lfs_rambd_erase(&bd->cfg->ram_cfg, block);
 }
 

@@ -136,7 +136,7 @@ static void dump_disk_suffix(int suffix) {
   uint8_t *rbuffer = malloc(cfg.block_size);
 
   for (uint32_t i = 0; i < cfg.block_count; i++) {
-    lfs_rambd_read(&cfg, i, 0, rbuffer, cfg.block_size);
+    lfs_testbd_read(&cfg, i, 0, rbuffer, cfg.block_size);
     fwrite(rbuffer, cfg.block_size, 1, f);
     last_read += cfg.block_size;
   }
