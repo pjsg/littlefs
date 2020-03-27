@@ -32,11 +32,9 @@ int lfs_rambd_createcfg(const struct lfs_config *cfg,
         }
     }
 
-    // zero for reproducability?
-    if (bd->cfg->erase_value != -1) {
-        memset(bd->buffer, bd->cfg->erase_value,
-                cfg->block_size * cfg->block_count);
-    }
+    // Set to something not the erase value
+    memset(bd->buffer, ~bd->cfg->erase_value,
+            cfg->block_size * cfg->block_count);
 
     LFS_TRACE("lfs_rambd_createcfg -> %d", 0);
     return 0;
@@ -98,11 +96,9 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
     LFS_ASSERT(block < cfg->block_count);
 
     // check that data was erased? only needed for testing
-    if (bd->cfg->erase_value != -1) {
-        for (lfs_off_t i = 0; i < size; i++) {
-            LFS_ASSERT(bd->buffer[block*cfg->block_size + off + i] ==
-                    bd->cfg->erase_value);
-        }
+    for (lfs_off_t i = 0; i < size; i++) {
+        LFS_ASSERT(bd->buffer[block*cfg->block_size + off + i] ==
+                bd->cfg->erase_value);
     }
 
     // program data
@@ -120,10 +116,8 @@ int lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block) {
     LFS_ASSERT(block < cfg->block_count);
 
     // erase, only needed for testing
-    if (bd->cfg->erase_value != -1) {
-        memset(&bd->buffer[block*cfg->block_size],
-                bd->cfg->erase_value, cfg->block_size);
-    }
+    memset(&bd->buffer[block*cfg->block_size],
+            bd->cfg->erase_value, cfg->block_size);
 
     LFS_TRACE("lfs_rambd_erase -> %d", 0);
     return 0;
