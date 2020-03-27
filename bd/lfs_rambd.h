@@ -27,6 +27,11 @@ struct lfs_rambd_config {
 
 // rambd state
 typedef struct lfs_rambd {
+    struct {
+      unsigned int read_count;
+      unsigned int prog_count;
+      unsigned int erase_count;
+    } stats;
     uint8_t *buffer;
     const struct lfs_rambd_config *cfg;
 } lfs_rambd_t;
@@ -34,6 +39,7 @@ typedef struct lfs_rambd {
 
 // Create a RAM block device using the geometry in lfs_config
 int lfs_rambd_create(const struct lfs_config *cfg);
+int lfs_rambd_createcfg_mmap(const struct lfs_config *cfg, const struct lfs_rambd_config *bdcfg, const char *filename);
 int lfs_rambd_createcfg(const struct lfs_config *cfg,
         const struct lfs_rambd_config *bdcfg);
 
@@ -49,6 +55,7 @@ int lfs_rambd_read(const struct lfs_config *cfg, lfs_block_t block,
 // The block must have previously been erased.
 int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, const void *buffer, lfs_size_t size);
+
 
 // Erase a block
 //
