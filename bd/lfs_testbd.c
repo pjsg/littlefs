@@ -38,6 +38,7 @@ int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
             bdcfg->buffer, bdcfg->wear_buffer);
     lfs_testbd_t *bd = cfg->context;
     bd->cfg = bdcfg;
+    bd->powerfail_after = 0;
 
     // setup testing things
     bd->power_cycles = bd->cfg->power_cycles;
