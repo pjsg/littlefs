@@ -74,13 +74,18 @@ typedef struct lfs_testbd {
         } ram;
     } u;
 
-    bool persist;
     uint32_t power_cycles;
     lfs_testbd_wear_t *wear;
     //
     // powerfail after operation count
     int powerfail_after;
 
+<<<<<<< HEAD
+=======
+    // Do we write the last byte in a powerfail completely or only partially?
+    bool partial_byte_writes;
+
+>>>>>>> test-revamp-ctz-fuzz
     // Where to go on powerfail
     jmp_buf powerfail;
 
@@ -137,7 +142,7 @@ lfs_testbd_swear_t lfs_testbd_getwear(const struct lfs_config *cfg,
 int lfs_testbd_setwear(const struct lfs_config *cfg,
         lfs_block_t block, lfs_testbd_wear_t wear);
 
-void lfs_testbd_setpowerfail(const struct lfs_config *cfg, int powerfail_after, jmp_buf powerfail);
+void lfs_testbd_setpowerfail(const struct lfs_config *cfg, int powerfail_after, bool partial_byte_writes, jmp_buf powerfail);
 
 #ifdef __cplusplus
 } /* extern "C" */

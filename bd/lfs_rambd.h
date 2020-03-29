@@ -32,7 +32,6 @@ typedef struct lfs_rambd {
       unsigned int prog_count;
       unsigned int erase_count;
     } stats;
-    unsigned int prog_abort_bits;    // 0 is no abort
     uint8_t *buffer;
     const struct lfs_rambd_config *cfg;
 } lfs_rambd_t;
@@ -56,8 +55,6 @@ int lfs_rambd_read(const struct lfs_config *cfg, lfs_block_t block,
 // The block must have previously been erased.
 int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, const void *buffer, lfs_size_t size);
-
-void lfs_rambd_prog_abort(const struct lfs_config *cfg, unsigned int abort_bits);
 
 // Erase a block
 //

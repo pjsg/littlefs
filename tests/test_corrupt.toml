@@ -1,0 +1,28 @@
+[[case]]
+code = '''
+lfs_file_t fd[4]; uint32_t i;
+char buff[2048]; for (i = 0; i < sizeof(buff); i++) { buff[i] = i * 19; } jmp_buf powerfail; (void) powerfail;
+lfs_format(&lfs, &cfg) => 0;
+lfs_mount(&lfs, &cfg) => 0;
+char rbuff[2048];
+rbuff[0] = 0; // Reference this buffer
+lfs_file_open(&lfs, &fd[1], "2file2.xxxxxx", 0x103) => 0;
+lfs_file_truncate(&lfs, &fd[1], 1734) => 0;
+lfs_file_sync(&lfs, &fd[1]) => 0;
+lfs_file_open(&lfs, &fd[2], "3file3.xxxxxxxx", 0x503) => 0;
+lfs_file_close(&lfs, &fd[1]) => 0;
+lfs_file_open(&lfs, &fd[1], "4file4.xxxxxxxxxx", 0x503) => 0;
+lfs_remove(&lfs, "3file3.xxxxxxxx") => 0;
+lfs_file_close(&lfs, &fd[2]) => 0;
+lfs_file_open(&lfs, &fd[2], "3file3.xxxxxxxx", 0x503) => 0;
+lfs_remove(&lfs, "3file3.xxxxxxxx") => 0;
+lfs_file_close(&lfs, &fd[1]) => 0;
+lfs_file_open(&lfs, &fd[1], "3file3.xxxxxxxx", 0x503) => 0;
+lfs_mount(&lfs, &cfg) => 0;
+lfs_file_open(&lfs, &fd[3], "2file2.xxxxxx", 0x103) => 0;
+lfs_remove(&lfs, "2file2.xxxxxx") => 0;
+lfs_file_open(&lfs, &fd[1], "5file5.xxxxxxxxxxxx", 0x503) => 0;
+lfs_file_truncate(&lfs, &fd[1], 1972) => 0;
+lfs_file_truncate(&lfs, &fd[3], 2176) => 0;
+
+'''
