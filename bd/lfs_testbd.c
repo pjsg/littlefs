@@ -143,11 +143,13 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
         uint8_t last_byte = ((uint8_t *) buffer)[nsize] | (7 * bd->powerfail_after);
         bd->powerfail_after = 0;
         do_powerfail = 1;
-        printf("Byte at offset 0x%x should have been 0x%02x, but wrote 0x%02x instead.\n",
-               off, ((uint8_t *) buffer)[nsize], last_byte);
-        rc = lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, &last_byte, 1);
-        if (rc) {
-          return rc;
+        if (bd->partial_byte_writes) {
+            printf("Byte at offset 0x%x should have been 0x%02x, but wrote 0x%02x instead.\n",
+                   off, ((uint8_t *) buffer)[nsize], last_byte);
+            rc = lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, &last_byte, 1);
+            if (rc) {
+              return rc;
+            }
         }
     }
     if (do_powerfail) {
@@ -328,10 +330,11 @@ int lfs_testbd_setwear(const struct lfs_config *cfg,
     return 0;
 }
 
-void lfs_testbd_setpowerfail(const struct lfs_config *cfg, int powerfail_after, jmp_buf powerfail) {
+void lfs_testbd_setpowerfail(const struct lfs_config *cfg, int powerfail_after, bool partial_byte_writes, jmp_buf powerfail) {
     LFS_TRACE("lfs_testbd_setpowerfail(%p, %"PRIu32")", (void*)cfg, powerfail_after);
     lfs_testbd_t *bd = cfg->context;
 
     bd->powerfail_after = powerfail_after;
+    bd->partial_byte_writes = partial_byte_writes;
     memcpy(bd->powerfail, powerfail, sizeof(jmp_buf));
 }
