@@ -447,7 +447,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
       int amnt = (fgetc(f) + (arg << 8));
       lfs_testbd_setpowerfail(&cfg, amnt, partial_byte_writes, hook_abort);
       EMIT("if (setjmp(powerfail)) { goto powerfail%d; }\n", powerfail_index);
-      EMIT("lfs_testbd_setpowerfail(&cfg, %d, powerfail);\n", amnt);
+      EMIT("lfs_testbd_setpowerfail(&cfg, %d, %d, powerfail);\n", amnt, partial_byte_writes);
 
       if (partial_byte_writes) {
           LOGOP("  Setting prog abort after (roughly) %d bytes, with last byte only partially written\n", amnt >> 5);
