@@ -80,12 +80,9 @@ typedef struct lfs_testbd {
     // powerfail after operation count
     int powerfail_after;
 
-<<<<<<< HEAD
-=======
     // Do we write the last byte in a powerfail completely or only partially?
     bool partial_byte_writes;
 
->>>>>>> test-revamp-ctz-fuzz
     // Where to go on powerfail
     jmp_buf powerfail;
 
