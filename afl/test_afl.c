@@ -21,7 +21,7 @@
 #include <errno.h>
 #include <setjmp.h>
 
-static int run_fuzz_test(FILE *f, int maxfds, char *skipitems);
+static int run_fuzz_test(FILE *f, int maxfds, char *skipitems, powerfail_behavior_t);
 
 #if 0
 // test stuff
@@ -192,12 +192,17 @@ static int check_duration(void) {
 int main(int argc, char**argv) {
   int opt;
 
+  powerfail_behavior_t powerfail_behavior = 0;
+
   char skipitems[256];
   memset(skipitems, 0, sizeof(skipitems));
   char *emit_toml = NULL;
 
-  while ((opt = getopt(argc, argv, "pRn:t:")) > 0) {
+  while ((opt = getopt(argc, argv, "pRn:t:r")) > 0) {
     switch (opt) {
+      case 'r':
+        powerfail_behavior = 1;
+        break;
       case 'p':
         debuglog = 1;
         break;
@@ -262,7 +267,7 @@ int main(int argc, char**argv) {
     fprintf(toml, "[[case]]\ncode = '''\n");
     signal(SIGABRT, closetoml);
   }
-  run_fuzz_test(stdin, 4, skipitems);
+  run_fuzz_test(stdin, 4, skipitems, powerfail_behavior);
   if (toml) {
     fprintf(toml, "\n'''\n");
     fclose(toml);
@@ -280,7 +285,7 @@ static jmp_buf hook_abort;
     } \
 }
 
-static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
+static int run_fuzz_test(FILE *f, int maxfds, char *skipitems, powerfail_behavior_t powerfail_behavior) {
   // There are a bunch of arbitrary constants in this test case. Changing them will
   // almost certainly change the effets of an input file. It *may* be worth
   // making some of these constants to come from the input file.
@@ -302,8 +307,6 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
 #define FS &lfs
 
 #define DO(x) if (toml) { fprintf(toml, "%s\n", #x); } x;
-
-  bool partial_byte_writes = 0;
 
   int c;
 
@@ -445,12 +448,12 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
     case 'A':
     {
       int amnt = (fgetc(f) + (arg << 8));
-      lfs_testbd_setpowerfail(&cfg, amnt, partial_byte_writes, hook_abort);
+      lfs_testbd_setpowerfail(&cfg, amnt, powerfail_behavior, hook_abort);
       EMIT("if (setjmp(powerfail)) { goto powerfail%d; }\n", powerfail_index);
-      EMIT("lfs_testbd_setpowerfail(&cfg, %d, %d, powerfail);\n", amnt, partial_byte_writes);
+      EMIT("lfs_testbd_setpowerfail(&cfg, %d, %d, powerfail);\n", amnt, powerfail_behavior);
 
-      if (partial_byte_writes) {
-          LOGOP("  Setting prog abort after (roughly) %d bytes, with last byte only partially written\n", amnt >> 5);
+      if (powerfail_behavior) {
+          LOGOP("  Setting prog abort after (roughly) %d bytes, using realistic random corruption model\n", amnt);
       } else {
           LOGOP("  Setting prog abort after (roughly) %d bytes\n", amnt >> 5);
       }
@@ -592,6 +595,13 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems) {
         LOGOP("  mount");
         EMIT("lfs_mount(&lfs, &cfg) => 0;\n");
         MUST_WORK(lfs_mount(FS, &cfg));
+      }
+      break;
+
+    case 'n':
+      // Set powerfail behavior 
+      if (powerfail_behavior) {
+        powerfail_behavior = ((arg << 8) + fgetc(f)) | 0x10000;
       }
       break;
 

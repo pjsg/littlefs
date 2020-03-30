@@ -10,9 +10,11 @@ OPTS=-M
 
 SCREEN_FILE=/tmp/screen$RUNID
 
+TAFL_OPTS=$*
+
 for (( i = 1; i < $NPROCS; i++ ))
 do
-  echo screen afl-fuzz -i afltests/ -o ${FINDINGS:=/dev/shm/findings}$$/ $OPTS fuzz$i afl/test_afl >> $SCREEN_FILE
+  echo screen afl-fuzz -i afltests/ -o ${FINDINGS:=/dev/shm/findings}$$/ $OPTS fuzz$i afl/test_afl $TAFL_OPTS >> $SCREEN_FILE
   OPTS=-S
 done
 

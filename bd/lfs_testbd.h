@@ -34,6 +34,9 @@ enum lfs_testbd_badblock_behavior {
     LFS_TESTBD_BADBLOCK_ERASENOOP,
 };
 
+// 0 is write whole bytes. Anything else is used as a seed for randomly corrupting the whole area.
+typedef uint32_t powerfail_behavior_t;
+
 // Type for measuring wear
 typedef uint32_t lfs_testbd_wear_t;
 typedef int32_t  lfs_testbd_swear_t;
@@ -81,7 +84,7 @@ typedef struct lfs_testbd {
     int powerfail_after;
 
     // Do we write the last byte in a powerfail completely or only partially?
-    bool partial_byte_writes;
+    powerfail_behavior_t powerfail_behavior;
 
     // Where to go on powerfail
     jmp_buf powerfail;
@@ -139,7 +142,7 @@ lfs_testbd_swear_t lfs_testbd_getwear(const struct lfs_config *cfg,
 int lfs_testbd_setwear(const struct lfs_config *cfg,
         lfs_block_t block, lfs_testbd_wear_t wear);
 
-void lfs_testbd_setpowerfail(const struct lfs_config *cfg, int powerfail_after, bool partial_byte_writes, jmp_buf powerfail);
+void lfs_testbd_setpowerfail(const struct lfs_config *cfg, int powerfail_after, powerfail_behavior_t powerfail_behavior, jmp_buf powerfail);
 
 #ifdef __cplusplus
 } /* extern "C" */

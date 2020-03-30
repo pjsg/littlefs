@@ -60,7 +60,7 @@ afl/test: afl/*.c bd/lfs_rambd.c lfs*c bd/lfs_testbd.c
 	$(CC) $(CFLAGS) -g afl/test_afl.c -I. bd/lfs_testbd.c bd/lfs_rambd.c lfs.c lfs_util.c -o afl/test
 
 run_afl: test_afl
-	scripts/run_afl
+	scripts/run_afl $(TAFLAGS)
 	@echo Started fuzzing run -- use screen -r to view status
 
 -include $(DEP)
