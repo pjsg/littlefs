@@ -156,7 +156,7 @@ static void dump_disk(int info) {
 
 static void closetoml(int info) {
   (void) info;
-  fprintf(toml, "\n'''\n");
+  fprintf(toml, ";\n'''\n");
   fclose(toml);
 }
 
@@ -192,14 +192,17 @@ static int check_duration(void) {
 int main(int argc, char**argv) {
   int opt;
 
-  powerfail_behavior_t powerfail_behavior = 0;
+  powerfail_behavior_t powerfail_behavior = 1;
 
   char skipitems[256];
   memset(skipitems, 0, sizeof(skipitems));
   char *emit_toml = NULL;
 
-  while ((opt = getopt(argc, argv, "pRn:t:r")) > 0) {
+  while ((opt = getopt(argc, argv, "pRn:t:rs")) > 0) {
     switch (opt) {
+      case 's':
+        powerfail_behavior = 0;
+        break;
       case 'r':
         powerfail_behavior = 1;
         break;
@@ -269,7 +272,7 @@ int main(int argc, char**argv) {
   }
   run_fuzz_test(stdin, 4, skipitems, powerfail_behavior);
   if (toml) {
-    fprintf(toml, "\n'''\n");
+    fprintf(toml, ";\n'''\n");
     fclose(toml);
   }
 }
@@ -285,7 +288,7 @@ static jmp_buf hook_abort;
     } \
 }
 
-static int run_fuzz_test(FILE *f, int maxfds, char *skipitems, powerfail_behavior_t powerfail_behavior) {
+static int run_fuzz_test(FILE *f, int maxfds, char *skipitems, powerfail_behavior_t powerfail_behavior_init) {
   // There are a bunch of arbitrary constants in this test case. Changing them will
   // almost certainly change the effets of an input file. It *may* be worth
   // making some of these constants to come from the input file.
@@ -315,6 +318,7 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems, powerfail_behavio
   uint32_t i;
   )
 
+  powerfail_behavior_t powerfail_behavior = powerfail_behavior_init;
   memset(fd, -1, sizeof(fd));
   int openindex[4];
   memset(openindex, -1, sizeof(openindex));

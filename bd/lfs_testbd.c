@@ -9,12 +9,15 @@
 
 #include <stdlib.h>
 
-static void handle_powerfail(lfs_testbd_t *bd) {
+static void handle_powerfail(lfs_testbd_t *bd, const char *op) {
     if (bd->powerfail_after <= 0) {
       return;
     }
     bd->powerfail_after--;
     if (bd->powerfail_after == 0) {
+      if (op) {
+        printf("\nPowerfail during %s.\n", op);
+      }
       longjmp(bd->powerfail, 1);
     }
 }
@@ -110,7 +113,7 @@ int lfs_testbd_destroy(const struct lfs_config *cfg) {
 static int lfs_testbd_rawread(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, void *buffer, lfs_size_t size) {
     lfs_testbd_t *bd = cfg->context;
-    handle_powerfail(bd);
+    handle_powerfail(bd, "rawread");
     bd->stats.read_count += size;
     return lfs_rambd_read(&bd->cfg->ram_cfg, block, off, buffer, size);
 }
@@ -121,7 +124,9 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
     int do_powerfail = 0;
     int rc;
 
-    handle_powerfail(bd);
+    if (!bd->powerfail_behavior) {
+      handle_powerfail(bd, "rawprog");
+    }
 
     if (bd->powerfail_after > 0 && bd->powerfail_after < (int) size && bd->powerfail_behavior) {
       // Randomly trash the whole region
@@ -132,6 +137,9 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
       for (lfs_size_t i = 0; i < size; i++) {
         rbuffer[i] = rand();
       }
+
+      printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Corrupting region.\n",
+             size, off, block);
 
       lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, rbuffer, size);
       longjmp(bd->powerfail, 1);
@@ -161,14 +169,40 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
 static int lfs_testbd_rawerase(const struct lfs_config *cfg,
         lfs_block_t block) {
     lfs_testbd_t *bd = cfg->context;
-    handle_powerfail(bd);
+    if (!bd->powerfail_behavior) {
+      handle_powerfail(bd, "rawerase");
+    }
     bd->stats.erase_count++;
-    return lfs_rambd_erase(&bd->cfg->ram_cfg, block);
+    int rc = lfs_rambd_erase(&bd->cfg->ram_cfg, block);
+    if (rc) {
+      return rc;
+    }
+
+    if (bd->powerfail_behavior) {
+      if (bd->powerfail_after > 0) {
+        bd->powerfail_after--;
+        if (bd->powerfail_after == 0) {
+          printf("\nPowerfail during erase of block %d. Corrupting region.\n", block);
+          srand(bd->powerfail_behavior);
+          lfs_size_t size = bd->cfg->ram_cfg.block_size;
+          uint8_t rbuffer[size];
+
+          for (lfs_size_t i = 0; i < size; i++) {
+            rbuffer[i] = rand();
+          }
+
+          lfs_rambd_prog(&bd->cfg->ram_cfg, block, 0, rbuffer, size);
+          longjmp(bd->powerfail, 1);
+        }
+      }
+    }
+
+    return 0;
 }
 
 static int lfs_testbd_rawsync(const struct lfs_config *cfg) {
     lfs_testbd_t *bd = cfg->context;
-    handle_powerfail(bd);
+    handle_powerfail(bd, "rawsync");
     return lfs_rambd_sync(&bd->cfg->ram_cfg);
 }
 
