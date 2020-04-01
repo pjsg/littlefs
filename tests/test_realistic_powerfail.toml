@@ -1,0 +1,25 @@
+[[case]]
+define.LFS_READ_SIZE = 16
+define.LFS_PROG_SIZE = 8
+define.LFS_BLOCK_SIZE = 4096
+define.LFS_BLOCK_COUNT = 128
+define.LFS_BLOCK_CYCLES = 1024
+define.LFS_CACHE_SIZE = 256
+define.LFS_LOOKAHEAD_SIZE = 16
+code = '''
+lfs_file_t fd[4]; uint32_t i;
+char buff[2048]; for (i = 0; i < sizeof(buff); i++) { buff[i] = i * 19; } jmp_buf powerfail; (void) powerfail;
+lfs_format(&lfs, &cfg) => 0;
+lfs_mount(&lfs, &cfg) => 0;
+char rbuff[2048];
+rbuff[0] = 0; // Reference this buffer
+lfs_file_open(&lfs, &fd[2], "1file1.xxxx", 0x503) => 0;
+lfs_remove(&lfs, "0file0.xx") => -2;
+if (setjmp(powerfail)) { goto powerfail0; }
+lfs_testbd_setpowerfail(&cfg, 3, 77926, powerfail);
+lfs_file_open(&lfs, &fd[3], "3file3.xxxxxxxx", 0x503) ;
+// POWERFAIL ==========================
+powerfail0:
+lfs_mount(&lfs, &cfg) => 0;
+lfs_rename(&lfs, "1file1.xxxx", "2file2.xxxxxx") ;
+'''
