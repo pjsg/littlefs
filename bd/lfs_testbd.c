@@ -131,7 +131,7 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
 
     if (bd->powerfail_after > 0 && bd->powerfail_behavior) {
       bd->powerfail_after--;
-      if (!bd->powerfail) {
+      if (!bd->powerfail_after) {
         // Randomly trash the whole region
         bd->powerfail_after = 0;
         srand(bd->powerfail_behavior);
@@ -186,7 +186,7 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
     if (bd->powerfail_behavior) {
       if (bd->powerfail_after > 0) {
         bd->powerfail_after--;
-        if (bd->powerfail_after == 0) {
+        if (!bd->powerfail_after) {
           printf("\nPowerfail during erase of block %d. Corrupting region.\n", block);
           srand(bd->powerfail_behavior);
           lfs_size_t size = bd->cfg->ram_cfg.block_size;
