@@ -71,6 +71,21 @@ static int lfs_bd_read(lfs_t *lfs,
             diff = lfs_min(diff, rcache->off-off);
         }
 
+        if (size >= hint && off % lfs->cfg->read_size == 0 &&
+                size >= lfs->cfg->read_size) {
+            // bypass cache?
+            diff = lfs_aligndown(diff, lfs->cfg->read_size);
+            int err = lfs->cfg->read(lfs->cfg, block, off, data, diff);
+            if (err) {
+                return err;
+            }
+
+            data += diff;
+            off += diff;
+            size -= diff;
+            continue;
+        }
+
         // load to cache, first condition can no longer fail
         LFS_ASSERT(block < lfs->cfg->block_count);
         rcache->block = block;
@@ -437,6 +452,19 @@ static int lfs_alloc_lookahead(void *p, lfs_block_t block) {
     return 0;
 }
 
+static void lfs_alloc_ack(lfs_t *lfs) {
+    lfs->free.ack = lfs->cfg->block_count;
+}
+
+// Invalidate the lookahead buffer. This is done during mounting and
+// failed traversals
+static void lfs_alloc_reset(lfs_t *lfs) {
+    lfs->free.off = lfs->seed % lfs->cfg->block_size;
+    lfs->free.size = 0;
+    lfs->free.i = 0;
+    lfs_alloc_ack(lfs);
+}
+
 static int lfs_alloc(lfs_t *lfs, lfs_block_t *block) {
     while (true) {
         while (lfs->free.i != lfs->free.size) {
@@ -477,15 +505,11 @@ static int lfs_alloc(lfs_t *lfs, lfs_block_t *block) {
         memset(lfs->free.buffer, 0, lfs->cfg->lookahead_size);
         int err = lfs_fs_traverseraw(lfs, lfs_alloc_lookahead, lfs, true);
         if (err) {
+            lfs_alloc_reset(lfs);
             return err;
         }
     }
 }
-
-static void lfs_alloc_ack(lfs_t *lfs) {
-    lfs->free.ack = lfs->cfg->block_count;
-}
-
 
 /// Metadata pair and directory operations ///
 static lfs_stag_t lfs_dir_getslice(lfs_t *lfs, const lfs_mdir_t *dir,
@@ -973,7 +997,7 @@ static lfs_stag_t lfs_dir_fetchmatch(lfs_t *lfs,
         dir->rev = revs[(r+1)%2];
     }
 
-    LFS_ERROR("Corrupted dir pair at %"PRIx32" %"PRIx32,
+    LFS_ERROR("Corrupted dir pair at {0x%"PRIx32", 0x%"PRIx32"}",
             dir->pair[0], dir->pair[1]);
     return LFS_ERR_CORRUPT;
 }
@@ -1661,12 +1685,13 @@ relocate:
         relocated = true;
         lfs_cache_drop(lfs, &lfs->pcache);
         if (!tired) {
-            LFS_DEBUG("Bad block at %"PRIx32, dir->pair[1]);
+            LFS_DEBUG("Bad block at 0x%"PRIx32, dir->pair[1]);
         }
 
         // can't relocate superblock, filesystem is now frozen
         if (lfs_pair_cmp(dir->pair, (const lfs_block_t[2]){0, 1}) == 0) {
-            LFS_WARN("Superblock %"PRIx32" has become unwritable", dir->pair[1]);
+            LFS_WARN("Superblock 0x%"PRIx32" has become unwritable",
+                    dir->pair[1]);
             return LFS_ERR_NOSPC;
         }
 
@@ -1682,7 +1707,8 @@ relocate:
 
     if (relocated) {
         // update references if we relocated
-        LFS_DEBUG("Relocating %"PRIx32" %"PRIx32" -> %"PRIx32" %"PRIx32,
+        LFS_DEBUG("Relocating {0x%"PRIx32", 0x%"PRIx32"} "
+                    "-> {0x%"PRIx32", 0x%"PRIx32"}",
                 oldpair[0], oldpair[1], dir->pair[0], dir->pair[1]);
         int err = lfs_fs_relocate(lfs, oldpair, dir->pair);
         if (err) {
@@ -2305,7 +2331,7 @@ static int lfs_ctz_extend(lfs_t *lfs,
         }
 
 relocate:
-        LFS_DEBUG("Bad block at %"PRIx32, nblock);
+        LFS_DEBUG("Bad block at 0x%"PRIx32, nblock);
 
         // just clear cache and try a new block
         lfs_cache_drop(lfs, pcache);
@@ -2609,7 +2635,7 @@ static int lfs_file_relocate(lfs_t *lfs, lfs_file_t *file) {
         return 0;
 
 relocate:
-        LFS_DEBUG("Bad block at %"PRIx32, nblock);
+        LFS_DEBUG("Bad block at 0x%"PRIx32, nblock);
 
         // just clear cache and try a new block
         lfs_cache_drop(lfs, &lfs->pcache);
@@ -2686,7 +2712,7 @@ static int lfs_file_flush(lfs_t *lfs, lfs_file_t *file) {
                 break;
 
 relocate:
-                LFS_DEBUG("Bad block at %"PRIx32, file->block);
+                LFS_DEBUG("Bad block at 0x%"PRIx32, file->block);
                 err = lfs_file_relocate(lfs, file);
                 if (err) {
                     return err;
@@ -3720,7 +3746,7 @@ int lfs_mount(lfs_t *lfs, const struct lfs_config *cfg) {
             uint16_t minor_version = (0xffff & (superblock.version >>  0));
             if ((major_version != LFS_DISK_VERSION_MAJOR ||
                  minor_version > LFS_DISK_VERSION_MINOR)) {
-                LFS_ERROR("Invalid version %"PRIu16".%"PRIu16,
+                LFS_ERROR("Invalid version v%"PRIu16".%"PRIu16,
                         major_version, minor_version);
                 err = LFS_ERR_INVAL;
                 goto cleanup;
@@ -3776,7 +3802,7 @@ int lfs_mount(lfs_t *lfs, const struct lfs_config *cfg) {
 
     // update littlefs with gstate
     if (!lfs_gstate_iszero(&lfs->gstate)) {
-        LFS_DEBUG("Found pending gstate %08"PRIx32" %08"PRIx32" %08"PRIx32,
+        LFS_DEBUG("Found pending gstate 0x%08"PRIx32"%08"PRIx32"%08"PRIx32,
                 lfs->gstate.tag,
                 lfs->gstate.pair[0],
                 lfs->gstate.pair[1]);
@@ -3785,10 +3811,7 @@ int lfs_mount(lfs_t *lfs, const struct lfs_config *cfg) {
     lfs->gdisk = lfs->gstate;
 
     // setup free lookahead
-    lfs->free.off = lfs->seed % lfs->cfg->block_size;
-    lfs->free.size = 0;
-    lfs->free.i = 0;
-    lfs_alloc_ack(lfs);
+    lfs_alloc_reset(lfs);
 
     LFS_TRACE("lfs_mount -> %d", 0);
     return 0;
@@ -3994,8 +4017,6 @@ static int lfs_fs_relocate(lfs_t *lfs,
         const lfs_block_t oldpair[2], lfs_block_t newpair[2]) {
     // update internal root
     if (lfs_pair_cmp(oldpair, lfs->root) == 0) {
-        LFS_DEBUG("Relocating root %"PRIx32" %"PRIx32,
-                newpair[0], newpair[1]);
         lfs->root[0] = newpair[0];
         lfs->root[1] = newpair[1];
     }
@@ -4031,7 +4052,7 @@ static int lfs_fs_relocate(lfs_t *lfs,
         if (lfs_gstate_hasmovehere(&lfs->gstate, parent.pair)) {
             moveid = lfs_tag_id(lfs->gstate.tag);
             LFS_DEBUG("Fixing move while relocating "
-                    "%"PRIx32" %"PRIx32" %"PRIx16"\n",
+                    "{0x%"PRIx32", 0x%"PRIx32"} 0x%"PRIx16"\n",
                     parent.pair[0], parent.pair[1], moveid);
             lfs_fs_prepmove(lfs, 0x3ff, NULL);
             if (moveid < lfs_tag_id(tag)) {
@@ -4067,7 +4088,7 @@ static int lfs_fs_relocate(lfs_t *lfs,
         if (lfs_gstate_hasmovehere(&lfs->gstate, parent.pair)) {
             moveid = lfs_tag_id(lfs->gstate.tag);
             LFS_DEBUG("Fixing move while relocating "
-                    "%"PRIx32" %"PRIx32" %"PRIx16"\n",
+                    "{0x%"PRIx32", 0x%"PRIx32"} 0x%"PRIx16"\n",
                     parent.pair[0], parent.pair[1], moveid);
             lfs_fs_prepmove(lfs, 0x3ff, NULL);
         }
@@ -4108,7 +4129,7 @@ static int lfs_fs_demove(lfs_t *lfs) {
     }
 
     // Fix bad moves
-    LFS_DEBUG("Fixing move %"PRIx32" %"PRIx32" %"PRIx16,
+    LFS_DEBUG("Fixing move {0x%"PRIx32", 0x%"PRIx32"} 0x%"PRIx16,
             lfs->gdisk.pair[0],
             lfs->gdisk.pair[1],
             lfs_tag_id(lfs->gdisk.tag));
@@ -4159,7 +4180,7 @@ static int lfs_fs_deorphan(lfs_t *lfs) {
 
             if (tag == LFS_ERR_NOENT) {
                 // we are an orphan
-                LFS_DEBUG("Fixing orphan %"PRIx32" %"PRIx32,
+                LFS_DEBUG("Fixing orphan {0x%"PRIx32", 0x%"PRIx32"}",
                         pdir.tail[0], pdir.tail[1]);
 
                 err = lfs_dir_drop(lfs, &pdir, &dir);
@@ -4181,8 +4202,8 @@ static int lfs_fs_deorphan(lfs_t *lfs) {
 
             if (!lfs_pair_sync(pair, pdir.tail)) {
                 // we have desynced
-                LFS_DEBUG("Fixing half-orphan "
-                        "%"PRIx32" %"PRIx32" -> %"PRIx32" %"PRIx32,
+                LFS_DEBUG("Fixing half-orphan {0x%"PRIx32", 0x%"PRIx32"} "
+                            "-> {0x%"PRIx32", 0x%"PRIx32"}",
                         pdir.tail[0], pdir.tail[1], pair[0], pair[1]);
 
                 lfs_pair_tole32(pair);
@@ -4445,7 +4466,7 @@ static int lfs1_dir_fetch(lfs_t *lfs,
     }
 
     if (!valid) {
-        LFS_ERROR("Corrupted dir pair at %" PRIx32 " %" PRIx32 ,
+        LFS_ERROR("Corrupted dir pair at {0x%"PRIx32", 0x%"PRIx32"}",
                 tpair[0], tpair[1]);
         return LFS_ERR_CORRUPT;
     }
@@ -4633,7 +4654,8 @@ static int lfs1_mount(lfs_t *lfs, struct lfs1 *lfs1,
         }
 
         if (err || memcmp(superblock.d.magic, "littlefs", 8) != 0) {
-            LFS_ERROR("Invalid superblock at %d %d", 0, 1);
+            LFS_ERROR("Invalid superblock at {0x%"PRIx32", 0x%"PRIx32"}",
+                    0, 1);
             err = LFS_ERR_CORRUPT;
             goto cleanup;
         }
@@ -4642,7 +4664,7 @@ static int lfs1_mount(lfs_t *lfs, struct lfs1 *lfs1,
         uint16_t minor_version = (0xffff & (superblock.d.version >>  0));
         if ((major_version != LFS1_DISK_VERSION_MAJOR ||
              minor_version > LFS1_DISK_VERSION_MINOR)) {
-            LFS_ERROR("Invalid version %d.%d", major_version, minor_version);
+            LFS_ERROR("Invalid version v%d.%d", major_version, minor_version);
             err = LFS_ERR_INVAL;
             goto cleanup;
         }
@@ -4808,7 +4830,8 @@ int lfs_migrate(lfs_t *lfs, const struct lfs_config *cfg) {
 
             // Copy over first block to thread into fs. Unfortunately
             // if this fails there is not much we can do.
-            LFS_DEBUG("Migrating %"PRIx32" %"PRIx32" -> %"PRIx32" %"PRIx32,
+            LFS_DEBUG("Migrating {0x%"PRIx32", 0x%"PRIx32"} "
+                        "-> {0x%"PRIx32", 0x%"PRIx32"}",
                     lfs->root[0], lfs->root[1], dir1.head[0], dir1.head[1]);
 
             err = lfs_bd_erase(lfs, dir1.head[1]);
