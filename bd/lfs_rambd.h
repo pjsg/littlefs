@@ -35,11 +35,6 @@ struct lfs_rambd_config {
 
 // rambd state
 typedef struct lfs_rambd {
-    struct {
-      unsigned int read_count;
-      unsigned int prog_count;
-      unsigned int erase_count;
-    } stats;
     uint8_t *buffer;
     const struct lfs_rambd_config *cfg;
 } lfs_rambd_t;
