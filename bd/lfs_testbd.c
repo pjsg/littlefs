@@ -114,7 +114,8 @@ static int lfs_testbd_rawread(const struct lfs_config *cfg, lfs_block_t block,
         lfs_off_t off, void *buffer, lfs_size_t size) {
     lfs_testbd_t *bd = cfg->context;
     handle_powerfail(bd, "rawread");
-    bd->stats.read_count += size;
+    bd->stats.read_count++;
+    bd->stats.read_byte_count += size;
     return lfs_rambd_read(&bd->cfg->ram_cfg, block, off, buffer, size);
 }
 
@@ -128,21 +129,24 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
       handle_powerfail(bd, "rawprog");
     }
 
-    if (bd->powerfail_after > 0 && bd->powerfail_after < (int) size && bd->powerfail_behavior) {
-      // Randomly trash the whole region
-      bd->powerfail_after = 0;
-      srand(bd->powerfail_behavior);
-      uint8_t rbuffer[size];
+    if (bd->powerfail_after > 0 && bd->powerfail_behavior) {
+      bd->powerfail_after--;
+      if (!bd->powerfail) {
+        // Randomly trash the whole region
+        bd->powerfail_after = 0;
+        srand(bd->powerfail_behavior);
+        uint8_t rbuffer[size];
 
-      for (lfs_size_t i = 0; i < size; i++) {
-        rbuffer[i] = rand();
+        for (lfs_size_t i = 0; i < size; i++) {
+          rbuffer[i] = rand();
+        }
+
+        printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Corrupting region.\n",
+               size, off, block);
+
+        lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, rbuffer, size);
+        longjmp(bd->powerfail, 1);
       }
-
-      printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Corrupting region.\n",
-             size, off, block);
-
-      lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, rbuffer, size);
-      longjmp(bd->powerfail, 1);
     }
 
     lfs_size_t nsize = size;
@@ -157,7 +161,8 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
     if (rc) {
       return rc;
     }
-    bd->stats.prog_count += nsize;
+    bd->stats.prog_count++;
+    bd->stats.prog_byte_count += nsize;
 
     if (do_powerfail) {
         longjmp(bd->powerfail, 1);

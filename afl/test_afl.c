@@ -60,10 +60,31 @@ lfs_dir_t dir;
 int debuglog;
 int no_open_remove;
 
-#if 0
-#define LFS_READ_SIZE 8
+#define W25Q40
+
+#ifdef W25Q32
+#define LFS_CHIP_SIZE (4 * 1024 * 1024)
+#endif
+//
+#ifdef W25Q80
+#define LFS_CHIP_SIZE (1 * 1024 * 1024)
+#endif
+
+#ifdef W25Q40
+#define LFS_CHIP_SIZE (512 * 1024)
+#endif
+
+#ifdef LFS_CHIP_SIZE
 #define LFS_BLOCK_SIZE 4096
-#define LFS_BLOCK_COUNT 128
+#define LFS_BLOCK_COUNT (LFS_CHIP_SIZE / LFS_BLOCK_SIZE)
+
+// Reads can be of any size, but larger is faster
+#define LFS_READ_SIZE 16
+
+// This is used to align things.
+#define LFS_PROG_SIZE 8
+
+// This is used for read and write. 256 is a really good number for writes.
 #define LFS_CACHE_SIZE 256
 #endif
 
@@ -120,14 +141,16 @@ const struct lfs_config cfg = {
 #define MUST_WORK(call) { err = call; LOGOP(" -> %d\n", err); if (err < 0) { printf("**** " #call " must work and it failed\n"); abort(); }}
 #define LOGOP if (check_duration() || debuglog) printf
 
-static uint32_t last_read = 0;
-static uint32_t last_prog = 0;
-static uint32_t last_erase = 0;
+static lfs_testbd_stats_t last_stats;
 
 int break_suffix = -1;
 FILE *toml = NULL;
+static int dump_disk_enabled = 0;
 
 static void dump_disk_suffix(int suffix) {
+  if (!dump_disk_enabled) {
+    return;
+  }
   char fname[256];
   sprintf(fname, "/tmp/littlefs-disk-%d", suffix);
 
@@ -138,7 +161,8 @@ static void dump_disk_suffix(int suffix) {
   for (uint32_t i = 0; i < cfg.block_count; i++) {
     lfs_testbd_read(&cfg, i, 0, rbuffer, cfg.block_size);
     fwrite(rbuffer, cfg.block_size, 1, f);
-    last_read += cfg.block_size;
+    last_stats.read_byte_count += cfg.block_size;
+    last_stats.read_count++;
   }
 
   fclose(f);
@@ -169,14 +193,13 @@ static int check_duration(void) {
   int duration = (now.tv_sec - last.tv_sec) * 1000000 + now.tv_usec - last.tv_usec;
   last = now;
 
-  if (bd.stats.read_count != last_read || bd.stats.prog_count != last_prog || bd.stats.erase_count != last_erase) {
+  if (memcmp(&bd.stats, &last_stats, sizeof(last_stats))) {
     if (debuglog) {
-      printf("{r%d,p%d,e%d}", bd.stats.read_count - last_read, bd.stats.prog_count - last_prog,
-        bd.stats.erase_count - last_erase);
+#define DIFF(x)    (bd.stats.x - last_stats.x)
+      printf("{r%d/%d,p%d/%d,e%d}", DIFF(read_byte_count), DIFF(read_count), DIFF(prog_byte_count), DIFF(prog_count), DIFF(erase_count));
+#undef DIFF
     }
-    last_read = bd.stats.read_count;
-    last_prog = bd.stats.prog_count;
-    last_erase = bd.stats.erase_count;
+    last_stats = bd.stats;
   }
 
   if (duration > 1000) {
@@ -198,7 +221,7 @@ int main(int argc, char**argv) {
   memset(skipitems, 0, sizeof(skipitems));
   char *emit_toml = NULL;
 
-  while ((opt = getopt(argc, argv, "pRn:t:rs")) > 0) {
+  while ((opt = getopt(argc, argv, "dpRn:t:rs")) > 0) {
     switch (opt) {
       case 's':
         powerfail_behavior = 0;
@@ -208,6 +231,9 @@ int main(int argc, char**argv) {
         break;
       case 'p':
         debuglog = 1;
+        break;
+      case 'd':
+        dump_disk_enabled = 1;
         break;
       case 'R':
         no_open_remove = 1;
@@ -267,7 +293,16 @@ int main(int argc, char**argv) {
       fprintf(stderr, "Failed to open %s for write\n", emit_toml);
       exit(1);
     }
-    fprintf(toml, "[[case]]\ncode = '''\n");
+    fprintf(toml, "[[case]]\n");
+#define EMIT_DEFINE(def) fprintf(toml, "define.%s = %d\n", #def, def);
+    EMIT_DEFINE(LFS_READ_SIZE);
+    EMIT_DEFINE(LFS_PROG_SIZE);
+    EMIT_DEFINE(LFS_BLOCK_SIZE);
+    EMIT_DEFINE(LFS_BLOCK_COUNT);
+    EMIT_DEFINE(LFS_BLOCK_CYCLES);
+    EMIT_DEFINE(LFS_CACHE_SIZE);
+    EMIT_DEFINE(LFS_LOOKAHEAD_SIZE);
+    fprintf(toml, "code = '''\n");
     signal(SIGABRT, closetoml);
   }
   run_fuzz_test(stdin, 4, skipitems, powerfail_behavior);
@@ -451,13 +486,19 @@ static int run_fuzz_test(FILE *f, int maxfds, char *skipitems, powerfail_behavio
 
     case 'A':
     {
-      int amnt = (fgetc(f) + (arg << 8));
+      int amnt = arg;
+      if (!powerfail_behavior) {
+        amnt = (amnt << 8) + fgetc(f);
+      } else {
+        amnt = amnt & 7;
+      }
+      amnt++;
       lfs_testbd_setpowerfail(&cfg, amnt, powerfail_behavior, hook_abort);
       EMIT("if (setjmp(powerfail)) { goto powerfail%d; }\n", powerfail_index);
       EMIT("lfs_testbd_setpowerfail(&cfg, %d, %d, powerfail);\n", amnt, powerfail_behavior);
 
       if (powerfail_behavior) {
-          LOGOP("  Setting prog abort after (roughly) %d bytes, using realistic random corruption model\n", amnt);
+          LOGOP("  Setting prog abort after (roughly) %d operations, using realistic random corruption model\n", amnt);
       } else {
           LOGOP("  Setting prog abort after (roughly) %d bytes\n", amnt >> 5);
       }

@@ -68,6 +68,14 @@ struct lfs_testbd_config {
     struct lfs_config ram_cfg;
 };
 
+typedef struct {
+      unsigned int read_count;
+      unsigned int read_byte_count;
+      unsigned int prog_count;
+      unsigned int prog_byte_count;
+      unsigned int erase_count;
+} lfs_testbd_stats_t;
+
 // testbd state
 typedef struct lfs_testbd {
     union {
@@ -89,11 +97,7 @@ typedef struct lfs_testbd {
     // Where to go on powerfail
     jmp_buf powerfail;
 
-    struct {
-      unsigned int read_count;
-      unsigned int prog_count;
-      unsigned int erase_count;
-    } stats;
+    lfs_testbd_stats_t  stats;
 
     const struct lfs_testbd_config *cfg;
 } lfs_testbd_t;
