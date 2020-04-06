@@ -291,7 +291,7 @@ static inline bool lfs_tag_isvalid(lfs_tag_t tag) {
 }
 
 static inline bool lfs_tag_notprogrammed(lfs_tag_t tag) {
-    return ~tag;
+    return !~tag;
 }
 
 static inline bool lfs_tag_isdelete(lfs_tag_t tag) {
