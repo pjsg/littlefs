@@ -290,6 +290,10 @@ static inline bool lfs_tag_isvalid(lfs_tag_t tag) {
     return !(tag & 0x80000000);
 }
 
+static inline bool lfs_tag_notprogrammed(lfs_tag_t tag) {
+    return ~tag;
+}
+
 static inline bool lfs_tag_isdelete(lfs_tag_t tag) {
     return ((int32_t)(tag << 22) >> 22) == -1;
 }
@@ -837,10 +841,7 @@ static lfs_stag_t lfs_dir_fetchmatch(lfs_t *lfs,
             // next commit not yet programmed or we're not in valid range
             if (!lfs_tag_isvalid(tag)) {
                 dir->erased = (lfs_tag_type1(ptag) == LFS_TYPE_CRC &&
-                        dir->off % lfs->cfg->prog_size == 0);
-                // TODO Fix the above condition. THe line below is TEMPORARY.
-                // And it causes its own issues
-                // dir->erased = false;
+                        dir->off % lfs->cfg->prog_size == 0) && lfs_tag_notprogrammed(tag);
                 break;
             } else if (off + lfs_tag_dsize(tag) > lfs->cfg->block_size) {
                 dir->erased = false;
