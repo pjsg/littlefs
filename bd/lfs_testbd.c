@@ -61,7 +61,6 @@ int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
     }
 
     ((struct lfs_testbd_config *) bdcfg)->mmap_cfg = *cfg;
-    ((struct lfs_testbd_config *) bdcfg)->mmap_cfg.prog_size = 1;
 
     // create underlying block device
     bd->u.mmap.cfg = (struct lfs_mmapbd_config){
@@ -125,11 +124,7 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
     int do_powerfail = 0;
     int rc;
 
-    if (!bd->powerfail_behavior) {
-      handle_powerfail(bd, "rawprog");
-    }
-
-    if (bd->powerfail_after > 0 && bd->powerfail_behavior) {
+    if (bd->powerfail_after > 0) {
       bd->powerfail_after--;
       if (!bd->powerfail_after) {
         // Randomly trash the whole region
@@ -149,20 +144,12 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
       }
     }
 
-    lfs_size_t nsize = size;
-    if (bd->powerfail_after > 0 && (bd->powerfail_after >> 5) < (int) nsize) {
-      nsize = bd->powerfail_after >> 5;
-      do_powerfail = 1;
-      printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Wrote %d bytes.\n",
-             size, off, block, nsize);
-      bd->powerfail_after = 0;
-    }
-    rc = lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, off, buffer, nsize);
+    rc = lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, off, buffer, size);
     if (rc) {
       return rc;
     }
     bd->stats.prog_count++;
-    bd->stats.prog_byte_count += nsize;
+    bd->stats.prog_byte_count += size;
 
     if (do_powerfail) {
         longjmp(bd->powerfail, 1);
@@ -174,31 +161,26 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
 static int lfs_testbd_rawerase(const struct lfs_config *cfg,
         lfs_block_t block) {
     lfs_testbd_t *bd = cfg->context;
-    if (!bd->powerfail_behavior) {
-      handle_powerfail(bd, "rawerase");
-    }
     bd->stats.erase_count++;
     int rc = lfs_mmapbd_erase(&bd->cfg->mmap_cfg, block);
     if (rc) {
       return rc;
     }
 
-    if (bd->powerfail_behavior) {
-      if (bd->powerfail_after > 0) {
-        bd->powerfail_after--;
-        if (!bd->powerfail_after) {
-          printf("\nPowerfail during erase of block %d. Corrupting region.\n", block);
-          srand(bd->powerfail_behavior);
-          lfs_size_t size = bd->cfg->mmap_cfg.block_size;
-          uint8_t rbuffer[size];
+    if (bd->powerfail_after > 0) {
+      bd->powerfail_after--;
+      if (!bd->powerfail_after) {
+        printf("\nPowerfail during erase of block %d. Corrupting region.\n", block);
+        srand(bd->powerfail_behavior);
+        lfs_size_t size = bd->cfg->mmap_cfg.block_size;
+        uint8_t rbuffer[size];
 
-          for (lfs_size_t i = 0; i < size; i++) {
-            rbuffer[i] = rand();
-          }
-
-          lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, 0, rbuffer, size);
-          longjmp(bd->powerfail, 1);
+        for (lfs_size_t i = 0; i < size; i++) {
+          rbuffer[i] = rand();
         }
+
+        lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, 0, rbuffer, size);
+        longjmp(bd->powerfail, 1);
       }
     }
 
