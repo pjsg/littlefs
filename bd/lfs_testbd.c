@@ -1,5 +1,5 @@
 /*
- * Testing block device, wraps filebd and rambd while providing a bunch
+ * Testing block device, wraps mmapbd while providing a bunch
  * of hooks for testing littlefs in various conditions.
  *
  * Copyright (c) 2017, Arm Limited. All rights reserved.
@@ -60,19 +60,19 @@ int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
         memset(bd->wear, 0, sizeof(lfs_testbd_wear_t) * cfg->block_count);
     }
 
-    ((struct lfs_testbd_config *) bdcfg)->ram_cfg = *cfg;
-    ((struct lfs_testbd_config *) bdcfg)->ram_cfg.prog_size = 1;
+    ((struct lfs_testbd_config *) bdcfg)->mmap_cfg = *cfg;
+    ((struct lfs_testbd_config *) bdcfg)->mmap_cfg.prog_size = 1;
 
     // create underlying block device
-    bd->u.ram.cfg = (struct lfs_rambd_config){
+    bd->u.mmap.cfg = (struct lfs_mmapbd_config){
         .erase_value = bd->cfg->erase_value,
         .buffer = bd->cfg->buffer,
     };
     int err;
     if (path) {
-      err = lfs_rambd_createcfg_mmap(&bd->cfg->ram_cfg, &bd->u.ram.cfg, path);
+      err = lfs_mmapbd_createcfg_mmap(&bd->cfg->mmap_cfg, &bd->u.mmap.cfg, path);
     } else {
-      err = lfs_rambd_createcfg(&bd->cfg->ram_cfg, &bd->u.ram.cfg);
+      err = lfs_mmapbd_createcfg(&bd->cfg->mmap_cfg, &bd->u.mmap.cfg);
     }
     LFS_TESTBD_TRACE("lfs_testbd_createcfg -> %d", err);
     return err;
@@ -104,7 +104,7 @@ int lfs_testbd_destroy(const struct lfs_config *cfg) {
         lfs_free(bd->wear);
     }
 
-    int err = lfs_rambd_destroy(&bd->cfg->ram_cfg);
+    int err = lfs_mmapbd_destroy(&bd->cfg->mmap_cfg);
     LFS_TESTBD_TRACE("lfs_testbd_destroy -> %d", err);
     return err;
 }
@@ -116,7 +116,7 @@ static int lfs_testbd_rawread(const struct lfs_config *cfg, lfs_block_t block,
     handle_powerfail(bd, "rawread");
     bd->stats.read_count++;
     bd->stats.read_byte_count += size;
-    return lfs_rambd_read(&bd->cfg->ram_cfg, block, off, buffer, size);
+    return lfs_mmapbd_read(&bd->cfg->mmap_cfg, block, off, buffer, size);
 }
 
 static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
@@ -144,7 +144,7 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
         printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Corrupting region.\n",
                size, off, block);
 
-        lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, rbuffer, size);
+        lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, off, rbuffer, size);
         longjmp(bd->powerfail, 1);
       }
     }
@@ -157,7 +157,7 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
              size, off, block, nsize);
       bd->powerfail_after = 0;
     }
-    rc = lfs_rambd_prog(&bd->cfg->ram_cfg, block, off, buffer, nsize);
+    rc = lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, off, buffer, nsize);
     if (rc) {
       return rc;
     }
@@ -178,7 +178,7 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
       handle_powerfail(bd, "rawerase");
     }
     bd->stats.erase_count++;
-    int rc = lfs_rambd_erase(&bd->cfg->ram_cfg, block);
+    int rc = lfs_mmapbd_erase(&bd->cfg->mmap_cfg, block);
     if (rc) {
       return rc;
     }
@@ -189,14 +189,14 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
         if (!bd->powerfail_after) {
           printf("\nPowerfail during erase of block %d. Corrupting region.\n", block);
           srand(bd->powerfail_behavior);
-          lfs_size_t size = bd->cfg->ram_cfg.block_size;
+          lfs_size_t size = bd->cfg->mmap_cfg.block_size;
           uint8_t rbuffer[size];
 
           for (lfs_size_t i = 0; i < size; i++) {
             rbuffer[i] = rand();
           }
 
-          lfs_rambd_prog(&bd->cfg->ram_cfg, block, 0, rbuffer, size);
+          lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, 0, rbuffer, size);
           longjmp(bd->powerfail, 1);
         }
       }
@@ -208,7 +208,7 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
 static int lfs_testbd_rawsync(const struct lfs_config *cfg) {
     lfs_testbd_t *bd = cfg->context;
     handle_powerfail(bd, "rawsync");
-    return lfs_rambd_sync(&bd->cfg->ram_cfg);
+    return lfs_mmapbd_sync(&bd->cfg->mmap_cfg);
 }
 
 /// block device API ///

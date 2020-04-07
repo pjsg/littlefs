@@ -1,5 +1,5 @@
 /*
- * Testing block device, wraps filebd and rambd while providing a bunch
+ * Testing block device, wraps mmapbd while providing a bunch
  * of hooks for testing littlefs in various conditions.
  *
  * Copyright (c) 2017, Arm Limited. All rights reserved.
@@ -10,7 +10,7 @@
 
 #include "lfs.h"
 #include "lfs_util.h"
-#include "bd/lfs_rambd.h"
+#include "bd/lfs_mmapbd.h"
 #include "bd/lfs_filebd.h"
 #include <setjmp.h>
 
@@ -72,7 +72,7 @@ struct lfs_testbd_config {
     // Optional buffer for wear
     void *wear_buffer;
 
-    struct lfs_config ram_cfg;
+    struct lfs_config mmap_cfg;
 };
 
 typedef struct {
@@ -87,9 +87,9 @@ typedef struct {
 typedef struct lfs_testbd {
     union {
         struct {
-            lfs_rambd_t bd;
-            struct lfs_rambd_config cfg;
-        } ram;
+            lfs_mmapbd_t bd;
+            struct lfs_mmapbd_config cfg;
+        } mmap;
     } u;
 
     uint32_t power_cycles;
@@ -115,7 +115,7 @@ typedef struct lfs_testbd {
 // Create a test block device using the geometry in lfs_config
 //
 // Note that filebd is used if a path is provided, if path is NULL
-// testbd will use rambd which can be much faster.
+// testbd will use mmapbd which can be much faster.
 int lfs_testbd_create(const struct lfs_config *cfg, const char *path);
 int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
         const struct lfs_testbd_config *bdcfg);

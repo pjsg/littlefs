@@ -5,9 +5,6 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #include "bd/lfs_rambd.h"
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/mman.h>
 
 int lfs_rambd_createcfg(const struct lfs_config *cfg,
         const struct lfs_rambd_config *bdcfg) {
@@ -35,34 +32,14 @@ int lfs_rambd_createcfg(const struct lfs_config *cfg,
         }
     }
 
-    // set to something that isn't the erase value.
-    memset(bd->buffer, ~bd->cfg->erase_value,
-            cfg->block_size * cfg->block_count);
+    // zero for reproducability?
+    if (bd->cfg->erase_value != -1) {
+        memset(bd->buffer, bd->cfg->erase_value,
+                cfg->block_size * cfg->block_count);
+    }
 
     LFS_RAMBD_TRACE("lfs_rambd_createcfg -> %d", 0);
     return 0;
-}
-
-int lfs_rambd_createcfg_mmap(const struct lfs_config *cfg, 
-                            const struct lfs_rambd_config *bdcfg, const char *filename) {
-    LFS_TRACE("lfs_rambd_create(%p {.context=%p, "
-                ".read=%p, .prog=%p, .erase=%p, .sync=%p, "
-                ".read_size=%"PRIu32", .prog_size=%"PRIu32", "
-                ".block_size=%"PRIu32", .block_count=%"PRIu32"})",
-            (void*)cfg, cfg->context,
-            (void*)(uintptr_t)cfg->read, (void*)(uintptr_t)cfg->prog,
-            (void*)(uintptr_t)cfg->erase, (void*)(uintptr_t)cfg->sync,
-            cfg->read_size, cfg->prog_size, cfg->block_size, cfg->block_count);
-    static struct lfs_rambd_config defaults = {.erase_value=-1};
-    int fd = open(filename, O_CREAT|O_RDWR, 0640);
-    char *buffer = malloc(cfg->block_size * cfg->block_count);
-    memset(buffer, 0, cfg->block_size * cfg->block_count);
-    write(fd, buffer, cfg->block_size * cfg->block_count);
-    free(buffer);
-    defaults.buffer = mmap(0, cfg->block_size * cfg->block_count, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-    int err = lfs_rambd_createcfg(cfg, bdcfg);
-    LFS_TRACE("lfs_rambd_create -> %d", err);
-    return err;
 }
 
 int lfs_rambd_create(const struct lfs_config *cfg) {
@@ -123,23 +100,18 @@ int lfs_rambd_prog(const struct lfs_config *cfg, lfs_block_t block,
     LFS_ASSERT(block < cfg->block_count);
 
     // check that data was erased? only needed for testing
-    for (lfs_off_t i = 0; i < size; i++) {
-        int8_t current = bd->buffer[block*cfg->block_size + off + i];
-        uint8_t new_value = ((uint8_t *)buffer)[i];
-        if ((current & 0xff) != (bd->cfg->erase_value & 0xff)) {
-          printf("\nTrying to program 0x%02x into location with value 0x%02x (ought to be 0x%02x) [at offset 0x%x (in block %d) in a length of %d]\n",
-              new_value, current & 0xff,  bd->cfg->erase_value & 0xff, i + off, block, size);
-          LFS_ASSERT(current == bd->cfg->erase_value);
+    if (bd->cfg->erase_value != -1) {
+        for (lfs_off_t i = 0; i < size; i++) {
+            LFS_ASSERT(bd->buffer[block*cfg->block_size + off + i] ==
+                    bd->cfg->erase_value);
         }
     }
-
-    int rc = 0;
 
     // program data
     memcpy(&bd->buffer[block*cfg->block_size + off], buffer, size);
 
-    LFS_RAMBD_TRACE("lfs_rambd_prog -> %d", rc);
-    return rc;
+    LFS_RAMBD_TRACE("lfs_rambd_prog -> %d", 0);
+    return 0;
 }
 
 int lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block) {
@@ -150,8 +122,10 @@ int lfs_rambd_erase(const struct lfs_config *cfg, lfs_block_t block) {
     LFS_ASSERT(block < cfg->block_count);
 
     // erase, only needed for testing
-    memset(&bd->buffer[block*cfg->block_size],
-            bd->cfg->erase_value, cfg->block_size);
+    if (bd->cfg->erase_value != -1) {
+        memset(&bd->buffer[block*cfg->block_size],
+                bd->cfg->erase_value, cfg->block_size);
+    }
 
     LFS_RAMBD_TRACE("lfs_rambd_erase -> %d", 0);
     return 0;
