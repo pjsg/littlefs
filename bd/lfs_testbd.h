@@ -72,7 +72,6 @@ struct lfs_testbd_config {
     // Optional buffer for wear
     void *wear_buffer;
 
-    struct lfs_config mmap_cfg;
 };
 
 typedef struct {
@@ -92,6 +91,7 @@ typedef struct lfs_testbd {
         } mmap;
     } u;
 
+    uint8_t destroy_mmapbd;
     uint32_t power_cycles;
     lfs_testbd_wear_t *wear;
     //
@@ -106,6 +106,8 @@ typedef struct lfs_testbd {
 
     lfs_testbd_stats_t  stats;
 
+    struct lfs_config lower_lfs_cfg;
+
     const struct lfs_testbd_config *cfg;
 } lfs_testbd_t;
 
@@ -114,11 +116,11 @@ typedef struct lfs_testbd {
 
 // Create a test block device using the geometry in lfs_config
 //
-// Note that filebd is used if a path is provided, if path is NULL
-// testbd will use mmapbd which can be much faster.
+// Note that the path is optional.
 int lfs_testbd_create(const struct lfs_config *cfg, const char *path);
 int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
         const struct lfs_testbd_config *bdcfg);
+int lfs_testbd_create_lower(const struct lfs_config *cfg, const struct lfs_config *underlying_cfg, const struct lfs_testbd_config *bdcfg);
 
 // Clean up memory associated with block device
 int lfs_testbd_destroy(const struct lfs_config *cfg);

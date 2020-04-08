@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #include "bd/lfs_testbd.h"
+#include "bd/lfs_mmapbd.h"
 
 #include <stdlib.h>
 
@@ -20,6 +21,56 @@ static void handle_powerfail(lfs_testbd_t *bd, const char *op) {
       }
       longjmp(bd->powerfail, 1);
     }
+}
+
+int lfs_testbd_create_lower(const struct lfs_config *cfg, const struct lfs_config *lower, const struct lfs_testbd_config *bdcfg) {
+    LFS_TESTBD_TRACE("lfs_testbd_create_lower(%p {.context=%p, "
+                ".read=%p, .prog=%p, .erase=%p, .sync=%p, "
+                ".read_size=%"PRIu32", .prog_size=%"PRIu32", "
+                ".block_size=%"PRIu32", .block_count=%"PRIu32"}, "
+                "%p {.context=%p, "
+                ".read=%p, .prog=%p, .erase=%p, .sync=%p, "
+                ".read_size=%"PRIu32", .prog_size=%"PRIu32", "
+                ".block_size=%"PRIu32", .block_count=%"PRIu32"}, "
+                "%p {.erase_value=%"PRId32", .erase_cycles=%"PRIu32", "
+                ".badblock_behavior=%"PRIu8", .power_cycles=%"PRIu32", "
+                ".buffer=%p, .wear_buffer=%p})",
+            (void*)cfg, cfg->context,
+            (void*)(uintptr_t)cfg->read, (void*)(uintptr_t)cfg->prog,
+            (void*)(uintptr_t)cfg->erase, (void*)(uintptr_t)cfg->sync,
+            cfg->read_size, cfg->prog_size, cfg->block_size, cfg->block_count,
+            (void*)lower, lower->context,
+            (void*)(uintptr_t)lower->read, (void*)(uintptr_t)lower->prog,
+            (void*)(uintptr_t)lower->erase, (void*)(uintptr_t)lower->sync,
+            lower->read_size, lower->prog_size, lower->block_size, lower->block_count,
+            (void*)bdcfg, bdcfg->erase_value, bdcfg->erase_cycles,
+            bdcfg->badblock_behavior, bdcfg->power_cycles,
+            bdcfg->buffer, bdcfg->wear_buffer);
+    lfs_testbd_t *bd = cfg->context;
+    bd->cfg = bdcfg;
+    bd->powerfail_after = 0;
+
+    bd->lower_lfs_cfg = *lower;
+
+    // setup testing things
+    bd->power_cycles = bd->cfg->power_cycles;
+
+    if (bd->cfg->erase_cycles) {
+        if (bd->cfg->wear_buffer) {
+            bd->wear = bd->cfg->wear_buffer;
+        } else {
+            bd->wear = lfs_malloc(sizeof(lfs_testbd_wear_t)*cfg->block_count);
+            if (!bd->wear) {
+                LFS_TESTBD_TRACE("lfs_testbd_create_lower -> %d", LFS_ERR_NOMEM);
+                return LFS_ERR_NOMEM;
+            }
+        }
+
+        memset(bd->wear, 0, sizeof(lfs_testbd_wear_t) * cfg->block_count);
+    }
+
+    LFS_TESTBD_TRACE("lfs_testbd_create_lower -> %d", 0);
+    return 0;
 }
 
 int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
@@ -40,39 +91,28 @@ int lfs_testbd_createcfg(const struct lfs_config *cfg, const char *path,
             bdcfg->badblock_behavior, bdcfg->power_cycles,
             bdcfg->buffer, bdcfg->wear_buffer);
     lfs_testbd_t *bd = cfg->context;
-    bd->cfg = bdcfg;
-    bd->powerfail_after = 0;
 
-    // setup testing things
-    bd->power_cycles = bd->cfg->power_cycles;
-
-    if (bd->cfg->erase_cycles) {
-        if (bd->cfg->wear_buffer) {
-            bd->wear = bd->cfg->wear_buffer;
-        } else {
-            bd->wear = lfs_malloc(sizeof(lfs_testbd_wear_t)*cfg->block_count);
-            if (!bd->wear) {
-                LFS_TESTBD_TRACE("lfs_testbd_createcfg -> %d", LFS_ERR_NOMEM);
-                return LFS_ERR_NOMEM;
-            }
-        }
-
-        memset(bd->wear, 0, sizeof(lfs_testbd_wear_t) * cfg->block_count);
-    }
-
-    ((struct lfs_testbd_config *) bdcfg)->mmap_cfg = *cfg;
+    struct lfs_config lower = *cfg;     // Copy over all the parameters
+    lower.read  = &lfs_mmapbd_read;
+    lower.prog  = &lfs_mmapbd_prog;
+    lower.erase = &lfs_mmapbd_erase;
+    lower.sync  = &lfs_mmapbd_sync;
 
     // create underlying block device
     bd->u.mmap.cfg = (struct lfs_mmapbd_config){
-        .erase_value = bd->cfg->erase_value,
-        .buffer = bd->cfg->buffer,
+        .erase_value = bdcfg->erase_value,
+        .buffer = bdcfg->buffer,
     };
     int err;
     if (path) {
-      err = lfs_mmapbd_createcfg_mmap(&bd->cfg->mmap_cfg, &bd->u.mmap.cfg, path);
+      err = lfs_mmapbd_createcfg_mmap(&lower, &bd->u.mmap.cfg, path);
     } else {
-      err = lfs_mmapbd_createcfg(&bd->cfg->mmap_cfg, &bd->u.mmap.cfg);
+      err = lfs_mmapbd_createcfg(&lower, &bd->u.mmap.cfg);
     }
+    bd->destroy_mmapbd = 1;
+
+    err = lfs_testbd_create_lower(cfg, &lower, bdcfg);
+
     LFS_TESTBD_TRACE("lfs_testbd_createcfg -> %d", err);
     return err;
 }
@@ -103,7 +143,11 @@ int lfs_testbd_destroy(const struct lfs_config *cfg) {
         lfs_free(bd->wear);
     }
 
-    int err = lfs_mmapbd_destroy(&bd->cfg->mmap_cfg);
+    int err = 0;
+    
+    if (bd->destroy_mmapbd) {
+        err = lfs_mmapbd_destroy(&bd->lower_lfs_cfg);
+    }
     LFS_TESTBD_TRACE("lfs_testbd_destroy -> %d", err);
     return err;
 }
@@ -115,7 +159,7 @@ static int lfs_testbd_rawread(const struct lfs_config *cfg, lfs_block_t block,
     handle_powerfail(bd, "rawread");
     bd->stats.read_count++;
     bd->stats.read_byte_count += size;
-    return lfs_mmapbd_read(&bd->cfg->mmap_cfg, block, off, buffer, size);
+    return bd->lower_lfs_cfg.read(&bd->lower_lfs_cfg, block, off, buffer, size);
 }
 
 static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
@@ -139,12 +183,12 @@ static int lfs_testbd_rawprog(const struct lfs_config *cfg, lfs_block_t block,
         printf("\nPowerfail during write of %d bytes at offset 0x%x in block %d. Corrupting region.\n",
                size, off, block);
 
-        lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, off, rbuffer, size);
+        bd->lower_lfs_cfg.prog(&bd->lower_lfs_cfg, block, off, rbuffer, size);
         longjmp(bd->powerfail, 1);
       }
     }
 
-    rc = lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, off, buffer, size);
+    rc = bd->lower_lfs_cfg.prog(&bd->lower_lfs_cfg, block, off, buffer, size);
     if (rc) {
       return rc;
     }
@@ -162,7 +206,7 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
         lfs_block_t block) {
     lfs_testbd_t *bd = cfg->context;
     bd->stats.erase_count++;
-    int rc = lfs_mmapbd_erase(&bd->cfg->mmap_cfg, block);
+    int rc = bd->lower_lfs_cfg.erase(&bd->lower_lfs_cfg, block);
     if (rc) {
       return rc;
     }
@@ -172,14 +216,14 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
       if (!bd->powerfail_after) {
         printf("\nPowerfail during erase of block %d. Corrupting region.\n", block);
         srand(bd->powerfail_behavior);
-        lfs_size_t size = bd->cfg->mmap_cfg.block_size;
+        lfs_size_t size = bd->lower_lfs_cfg.block_size;
         uint8_t rbuffer[size];
 
         for (lfs_size_t i = 0; i < size; i++) {
           rbuffer[i] = rand();
         }
 
-        lfs_mmapbd_prog(&bd->cfg->mmap_cfg, block, 0, rbuffer, size);
+        bd->lower_lfs_cfg.prog(&bd->lower_lfs_cfg, block, 0, rbuffer, size);
         longjmp(bd->powerfail, 1);
       }
     }
@@ -190,7 +234,7 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
 static int lfs_testbd_rawsync(const struct lfs_config *cfg) {
     lfs_testbd_t *bd = cfg->context;
     handle_powerfail(bd, "rawsync");
-    return lfs_mmapbd_sync(&bd->cfg->mmap_cfg);
+    return bd->lower_lfs_cfg.sync(&bd->lower_lfs_cfg);
 }
 
 /// block device API ///

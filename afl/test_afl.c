@@ -9,6 +9,7 @@
 #include "lfs.h"
 #include "bd/lfs_rambd.h"
 #include "bd/lfs_testbd.h"
+#include "bd/lfs_cryptbd.h"
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
@@ -249,11 +250,54 @@ int main(int argc, char**argv) {
     }
   }
 
+  struct lfs_config lower = cfg;
+  lower.read = lfs_mmapbd_read;
+  lower.prog = lfs_mmapbd_prog;
+  lower.erase = lfs_mmapbd_erase;
+  lower.sync = lfs_mmapbd_sync;
+
+  struct lfs_mmapbd_config mmap_cfg;
+  memset(&mmap_cfg, 0, sizeof(mmap_cfg));
+  mmap_cfg.erase_value = -1;
+
+  struct lfs_mmapbd mmap_ctx;
+  memset(&mmap_ctx, 0, sizeof(mmap_ctx));
+
+  lower.context = &mmap_ctx;
+
   if (debuglog) {
-    lfs_testbd_create(&cfg, "/tmp/littlefs-live-disk");
+    lfs_mmapbd_createcfg_mmap(&lower, &mmap_cfg, "/tmp/littlefs-live-disk");
   } else {
-    lfs_testbd_create(&cfg, NULL);
+    lfs_mmapbd_createcfg(&lower, &mmap_cfg);
   }
+
+  struct lfs_testbd_config testbd_cfg;
+  memset(&testbd_cfg, 0, sizeof(testbd_cfg));
+
+#if 1
+  struct lfs_config lower_crypt = cfg;
+  lower_crypt.read = lfs_cryptbd_read;
+  lower_crypt.prog = lfs_cryptbd_prog;
+  lower_crypt.erase = lfs_cryptbd_erase;
+  lower_crypt.sync = lfs_cryptbd_sync;
+
+  struct lfs_cryptbd_config crypt_cfg;
+  memset(&crypt_cfg, 0, sizeof(crypt_cfg));
+
+  strcpy(crypt_cfg.key, "Hello");
+
+  struct lfs_cryptbd crypt_ctx;
+  memset(&crypt_ctx, 0, sizeof(crypt_ctx));
+
+  lower_crypt.context = &crypt_ctx;
+
+  lfs_cryptbd_create(&lower_crypt, &lower, &crypt_cfg);
+
+  lfs_testbd_create_lower(&cfg, &lower_crypt, &testbd_cfg);
+#else
+  lfs_testbd_create_lower(&cfg, &lower, &testbd_cfg);
+#endif
+
 
   gettimeofday(&last, 0);
 
