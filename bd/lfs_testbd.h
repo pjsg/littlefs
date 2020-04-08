@@ -55,6 +55,10 @@ struct lfs_testbd_config {
     // operations to store the erase value.
     int32_t erase_value;
 
+    // If non-zero, then we emulate an encrypted drive -- all this means is that
+    // erased space is junk.
+    uint32_t key;
+
     // Number of erase cycles before a block becomes "bad". The exact behavior
     // of bad blocks is controlled by the badblock_mode.
     uint32_t erase_cycles;

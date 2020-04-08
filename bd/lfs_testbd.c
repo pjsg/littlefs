@@ -206,6 +206,21 @@ static int lfs_testbd_rawerase(const struct lfs_config *cfg,
         lfs_block_t block) {
     lfs_testbd_t *bd = cfg->context;
     bd->stats.erase_count++;
+
+    if (bd->cfg->key) {
+        srand(bd->cfg->key ^ block);
+        lfs_size_t size = bd->lower_lfs_cfg.block_size;
+        uint8_t rbuffer[size];
+
+        for (lfs_size_t i = 0; i < size; i++) {
+          rbuffer[i] = rand();
+        }
+
+        bd->lower_lfs_cfg.prog(&bd->lower_lfs_cfg, block, 0, rbuffer, size);
+
+        return 0;
+    }
+
     int rc = bd->lower_lfs_cfg.erase(&bd->lower_lfs_cfg, block);
     if (rc) {
       return rc;

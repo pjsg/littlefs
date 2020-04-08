@@ -4,12 +4,13 @@
  */
 #define HAVE_MULTIPLE_OPEN
 
+#define DEFAULT_ENCRYPT
+
 #define _BSD_SOURCE
 
 #include "lfs.h"
 #include "bd/lfs_rambd.h"
 #include "bd/lfs_testbd.h"
-#include "bd/lfs_cryptbd.h"
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
@@ -221,9 +222,20 @@ int main(int argc, char**argv) {
   char skipitems[256];
   memset(skipitems, 0, sizeof(skipitems));
   char *emit_toml = NULL;
+#ifdef DEFAULT_ENCRYPT
+  char encrypt = 1;
+#else
+  char encrypt = 0;
+#endif
 
-  while ((opt = getopt(argc, argv, "dpRn:t:rs")) > 0) {
+  while ((opt = getopt(argc, argv, "EedpRn:t:rs")) > 0) {
     switch (opt) {
+      case 'E':
+        encrypt = 0;
+        break;
+      case 'e':
+        encrypt = 1;
+        break;
       case 's':
         powerfail_behavior = 0;
         break;
@@ -258,7 +270,11 @@ int main(int argc, char**argv) {
 
   struct lfs_mmapbd_config mmap_cfg;
   memset(&mmap_cfg, 0, sizeof(mmap_cfg));
-  mmap_cfg.erase_value = -1;
+  if (encrypt) {
+      mmap_cfg.erase_value = -1;
+  } else {
+      mmap_cfg.erase_value = 0xff;
+  }
 
   struct lfs_mmapbd mmap_ctx;
   memset(&mmap_ctx, 0, sizeof(mmap_ctx));
@@ -274,30 +290,14 @@ int main(int argc, char**argv) {
   struct lfs_testbd_config testbd_cfg;
   memset(&testbd_cfg, 0, sizeof(testbd_cfg));
 
-#if 1
-  struct lfs_config lower_crypt = cfg;
-  lower_crypt.read = lfs_cryptbd_read;
-  lower_crypt.prog = lfs_cryptbd_prog;
-  lower_crypt.erase = lfs_cryptbd_erase;
-  lower_crypt.sync = lfs_cryptbd_sync;
+  if (encrypt) {
+      testbd_cfg.key = fgetc(stdin);
+      testbd_cfg.key += fgetc(stdin) << 8;
+      testbd_cfg.key += fgetc(stdin) << 16;
+      testbd_cfg.key += fgetc(stdin) << 24;
+  }
 
-  struct lfs_cryptbd_config crypt_cfg;
-  memset(&crypt_cfg, 0, sizeof(crypt_cfg));
-
-  strcpy(crypt_cfg.key, "Hello");
-
-  struct lfs_cryptbd crypt_ctx;
-  memset(&crypt_ctx, 0, sizeof(crypt_ctx));
-
-  lower_crypt.context = &crypt_ctx;
-
-  lfs_cryptbd_create(&lower_crypt, &lower, &crypt_cfg);
-
-  lfs_testbd_create_lower(&cfg, &lower_crypt, &testbd_cfg);
-#else
   lfs_testbd_create_lower(&cfg, &lower, &testbd_cfg);
-#endif
-
 
   gettimeofday(&last, 0);
 
