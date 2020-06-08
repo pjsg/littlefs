@@ -53,6 +53,7 @@ DEFINES = {
     'LFS_ERASE_VALUE': 0xff,
     'LFS_ERASE_CYCLES': 0,
     'LFS_BADBLOCK_BEHAVIOR': 'LFS_TESTBD_BADBLOCK_PROGERROR',
+    'LFS_TESTBD_KEY': 0,
 }
 PROLOGUE = """
     // prologue
@@ -86,6 +87,7 @@ PROLOGUE = """
         .erase_cycles       = LFS_ERASE_CYCLES,
         .badblock_behavior  = LFS_BADBLOCK_BEHAVIOR,
         .power_cycles       = lfs_testbd_cycles,
+        .key                = LFS_TESTBD_KEY,
     };
 
     lfs_testbd_createcfg(&cfg, lfs_testbd_path, &bdcfg) => 0;

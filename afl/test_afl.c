@@ -25,6 +25,8 @@
 
 static int run_fuzz_test(FILE *f, int maxfds, char *skipitems, powerfail_behavior_t);
 
+extern int dummy_fn(char *);
+
 #if 0
 // test stuff
 static void test_assert(const char *file, unsigned line,
@@ -290,6 +292,8 @@ int main(int argc, char**argv) {
   struct lfs_testbd_config testbd_cfg;
   memset(&testbd_cfg, 0, sizeof(testbd_cfg));
 
+  dummy_fn("get started");
+
   if (encrypt) {
       testbd_cfg.key = fgetc(stdin);
       testbd_cfg.key += fgetc(stdin) << 8;
@@ -306,27 +310,7 @@ int main(int argc, char**argv) {
   LOGOP("format/mount");
   lfs_format(&lfs, &cfg);
   MUST_WORK(lfs_mount(&lfs, &cfg));
-#if 0
 
-  // read current count
-  uint32_t boot_count = 0;
-  lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
-  lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
-
-  // update boot count
-  boot_count += 1;
-  lfs_file_rewind(&lfs, &file);
-  lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
-
-  // remember the storage is not updated until the file is closed successfully
-  lfs_file_close(&lfs, &file);
-
-  // release any resources we were using
-  lfs_unmount(&lfs);
-
-  // print the boot count
-  printf("boot_count: %d\n", boot_count);
-#endif
   if (debuglog) {
     signal(SIGABRT, dump_disk);
   }
@@ -346,6 +330,8 @@ int main(int argc, char**argv) {
     EMIT_DEFINE(LFS_BLOCK_CYCLES);
     EMIT_DEFINE(LFS_CACHE_SIZE);
     EMIT_DEFINE(LFS_LOOKAHEAD_SIZE);
+    fprintf(toml, "define.LFS_ERASE_VALUE = %d\n", mmap_cfg.erase_value);
+    fprintf(toml, "define.LFS_TESTBD_KEY = %d\n", testbd_cfg.key);
     fprintf(toml, "code = '''\n");
     signal(SIGABRT, closetoml);
   }
