@@ -25,7 +25,8 @@ override CFLAGS += -DLFS_YES_TRACE
 endif
 override CFLAGS += -I.
 override CFLAGS += -std=c99 -Wall -pedantic
-override CFLAGS += -Wextra -Wshadow -Wjump-misses-init -Wundef
+override CFLAGS += -Wextra -Wshadow -Wundef
+override CFLAGS += -Wno-missing-field-initializers
 
 ifdef VERBOSE
 override TFLAGS += -v
